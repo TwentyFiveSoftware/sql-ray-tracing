@@ -1,4 +1,5 @@
 SET SESSION cte_max_recursion_depth = 1000000;
+SET SESSION group_concat_max_len = 1000000000000;
 
 SET @WIDTH = 300;
 SET @HEIGHT = 200;
@@ -64,10 +65,20 @@ WITH
     pixels (x, y, r, g, b) AS (
         SELECT pixel_x,
                pixel_y,
-               grayscale_color,
-               grayscale_color,
-               grayscale_color
+               FLOOR(grayscale_color * 0xFF),
+               FLOOR(grayscale_color * 0xFF),
+               FLOOR(grayscale_color * 0xFF)
         FROM ray_colors
+    ),
+    image_pixel_rows (image_pixel_row) AS (
+        SELECT CONCAT(r, ' ', g, ' ', b)
+        FROM pixels
+        ORDER BY y, x
+    ),
+    image_pixels (image_pixels) AS (
+        SELECT GROUP_CONCAT(image_pixel_row SEPARATOR '\n')
+        FROM image_pixel_rows
     )
-SELECT *
-FROM pixels;
+SELECT CONCAT('P3\n', @WIDTH, ' ', @HEIGHT, '\n255\n', image_pixels)
+# INTO OUTFILE '/var/lib/mysql-files/render.ppm' FIELDS TERMINATED BY '' ESCAPED BY '' LINES TERMINATED BY '\n'
+FROM image_pixels;

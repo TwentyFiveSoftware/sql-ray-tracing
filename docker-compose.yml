@@ -2,8 +2,13 @@ services:
   mysql:
     image: mysql
     restart: always
+    command:
+      - 'mysqld'
+      - '--secure-file-priv=/var/lib/mysql-files'
     environment:
       MYSQL_ROOT_PASSWORD: super-secret-password
       MYSQL_DATABASE: ray-tracing
     ports:
       - '3306:3306'
+    volumes:
+      - './output:/var/lib/mysql-files'
