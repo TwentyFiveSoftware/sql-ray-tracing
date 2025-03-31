@@ -1,0 +1,9 @@
+services:
+  mysql:
+    image: mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: super-secret-password
+      MYSQL_DATABASE: ray-tracing
+    ports:
+      - '3306:3306'
