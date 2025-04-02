@@ -42,8 +42,10 @@ WITH
                CAST(y AS FLOAT) / (@HEIGHT - 1)
         FROM pixel_coordinates
     ),
-    rays (pixel_x, pixel_y, origin_x, origin_y, origin_z, direction_x, direction_y, direction_z) AS (
-        SELECT x,
+    not_normalized_rays (ray_id, pixel_x, pixel_y, origin_x, origin_y, origin_z, direction_x, direction_y, direction_z)
+        AS (
+        SELECT y * @WIDTH + x,
+               x,
                y,
                @CAMERA_ORIGIN_X,
                @CAMERA_ORIGIN_Y,
@@ -53,21 +55,76 @@ WITH
                @CAMERA_UPPER_LEFT_CORNER_Z
         FROM pixel_uv
     ),
-    ray_colors (pixel_x, pixel_y, grayscale_color)
+    rays (ray_id, pixel_x, pixel_y, origin_x, origin_y, origin_z, direction_x, direction_y, direction_z) AS (
+        SELECT ray_id,
+               pixel_x,
+               pixel_y,
+               origin_x,
+               origin_y,
+               origin_z,
+               direction_x / SQRT(direction_x * direction_x + direction_y * direction_y + direction_z * direction_z),
+               direction_y / SQRT(direction_x * direction_x + direction_y * direction_y + direction_z * direction_z),
+               direction_z / SQRT(direction_x * direction_x + direction_y * direction_y + direction_z * direction_z)
+        FROM not_normalized_rays
+    ),
+    ray_sphere_collisions (ray_id, t, point_x, point_y, point_z, normal_x, normal_y, normal_z, is_front_facing)
         AS (
+        SELECT -1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, FALSE -- TODO: TEMP!
+#         SELECT ray_id,
+#                0.0,
+#                0.0,
+#                0.0,
+#                0.0,
+#                0.0,
+#                0.0,
+#                0.0,
+#                FALSE
+#         FROM rays
+    ),
+    ray_collisions (ray_id, t, point_x, point_y, point_z, normal_x, normal_y, normal_z, is_front_facing) AS (
+        SELECT ray_sphere_collisions.ray_id,
+               ray_sphere_collisions.t,
+               point_x,
+               point_y,
+               point_z,
+               normal_x,
+               normal_y,
+               normal_z,
+               is_front_facing
+        FROM ray_sphere_collisions
+        JOIN (
+            SELECT ray_id, MIN(t) AS t
+            FROM ray_sphere_collisions
+            GROUP BY ray_id
+        ) lowest_t ON ray_sphere_collisions.ray_id = lowest_t.ray_id AND ray_sphere_collisions.t = lowest_t.t
+    ),
+    ray_hit_records (pixel_x, pixel_y, ray_direction_y, normal_x, normal_y, normal_z) AS (
         SELECT pixel_x,
                pixel_y,
-               ((direction_y /
-                 SQRT(direction_x * direction_x + direction_y * direction_y + direction_z * direction_z)
-                    ) + 1.0) * 0.5
+               direction_y,
+               normal_x,
+               normal_y,
+               normal_z
         FROM rays
+        LEFT OUTER JOIN ray_sphere_collisions ON rays.ray_id = ray_sphere_collisions.ray_id
+    ),
+    ray_colors (pixel_x, pixel_y, r, g, b) AS (
+        SELECT pixel_x,
+               pixel_y,
+               COALESCE(normal_x,
+                        1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.3 * ((ray_direction_y + 1.0) * 0.5)),
+               COALESCE(normal_y,
+                        1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.5 * ((ray_direction_y + 1.0) * 0.5)),
+               COALESCE(normal_z,
+                        1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.8 * ((ray_direction_y + 1.0) * 0.5))
+        FROM ray_hit_records
     ),
     pixels (x, y, r, g, b) AS (
         SELECT pixel_x,
                pixel_y,
-               FLOOR(grayscale_color * 0xFF),
-               FLOOR(grayscale_color * 0xFF),
-               FLOOR(grayscale_color * 0xFF)
+               FLOOR(r * 0xFF),
+               FLOOR(g * 0xFF),
+               FLOOR(b * 0xFF)
         FROM ray_colors
     ),
     image_pixel_rows (image_pixel_row) AS (
