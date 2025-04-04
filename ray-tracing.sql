@@ -124,65 +124,61 @@ WITH
                     JOIN all_rays
                          ON last_ray_per_pixel.pixel_id = all_rays.pixel_id AND
                             last_ray_per_pixel.depth = all_rays.ray_depth
-                    CROSS JOIN settings
                     WHERE should_trace = TRUE
                 ),
                 rays_to_trace AS (
-                    SELECT *
+                    SELECT last_ray_per_pixel.*
                     FROM last_ray_per_pixel,
                          settings
                     WHERE ray_depth < max_depth
                 ),
                 rays_exceeding_depth_limit AS (
-                    SELECT *
+                    SELECT last_ray_per_pixel.*
                     FROM last_ray_per_pixel,
                          settings
                     WHERE ray_depth >= max_depth
                 ),
-                closest_ray_intersections (ray_id, sphere_id, t) AS (
+                closest_ray_intersections AS (
                     WITH
-                        sphere_intersection_calc (ray_id, sphere_id, a, half_b, c) AS (
-                            SELECT ray_id,
+                        sphere_intersection_calc AS (
+                            SELECT rays_to_trace.*,
                                    sphere_id,
                                    ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
-                                   ray_direction_z * ray_direction_z,
+                                   ray_direction_z * ray_direction_z                   AS a,
                                    (ray_origin_x - spheres.center_x) * ray_direction_x +
                                    (ray_origin_y - spheres.center_y) * ray_direction_y +
-                                   (ray_origin_z - spheres.center_z) * ray_direction_z,
+                                   (ray_origin_z - spheres.center_z) * ray_direction_z AS half_b,
                                    ((ray_origin_x - spheres.center_x) * (ray_origin_x - spheres.center_x) +
                                     (ray_origin_y - spheres.center_y) * (ray_origin_y - spheres.center_y) +
                                     (ray_origin_z - spheres.center_z) * (ray_origin_z - spheres.center_z)) -
-                                   spheres.radius * spheres.radius
+                                   spheres.radius * spheres.radius                     AS c
                             FROM rays_to_trace,
                                  spheres
                         ),
-                        sphere_intersection_discriminants (ray_id, sphere_id, a, half_b, c, discriminant) AS (
-                            SELECT *, half_b * half_b - a * c
+                        sphere_intersection_discriminants AS (
+                            SELECT *,
+                                   half_b * half_b - a * c AS discriminant
                             FROM sphere_intersection_calc
                         ),
-                        sphere_intersection_roots (ray_id, sphere_id, root_1, root_2) AS (
-                            SELECT ray_id,
-                                   sphere_id,
-                                   (-half_b - SQRT(discriminant)) / a,
-                                   (-half_b + SQRT(discriminant)) / a
+                        sphere_intersection_roots AS (
+                            SELECT *,
+                                   (-half_b - SQRT(discriminant)) / a AS root_1,
+                                   (-half_b + SQRT(discriminant)) / a AS root_2
                             FROM sphere_intersection_discriminants
                             WHERE discriminant >= 0
                         ),
-                        sphere_intersection_t (ray_id, sphere_id, t) AS (
-                            SELECT ray_id,
-                                   sphere_id,
+                        sphere_intersection_t AS (
+                            SELECT *,
                                    CASE
                                        WHEN root_1 > sphere_collision_t_min AND root_1 <= root_2 THEN root_1
                                        WHEN root_2 > sphere_collision_t_min AND root_2 < root_1 THEN root_2
                                        ELSE -1.0
-                                       END
+                                       END AS t
                             FROM sphere_intersection_roots,
                                  settings
                         ),
                         closest_sphere_intersection AS (
-                            SELECT sphere_intersection_t.ray_id,
-                                   sphere_id,
-                                   sphere_intersection_t.t
+                            SELECT sphere_intersection_t.*
                             FROM sphere_intersection_t
                             JOIN (
                                 SELECT ray_id, MIN(t) AS t
@@ -198,14 +194,11 @@ WITH
                 hit_records (pixel_id, ray_id, ray_depth, normal_x, normal_y, normal_z) AS (
                     WITH
                         intersection_point AS (
-                            SELECT rays_to_trace.*,
-                                   sphere_id,
-                                   t,
+                            SELECT *,
                                    ray_origin_x + ray_direction_x * t AS point_x,
                                    ray_origin_y + ray_direction_y * t AS point_y,
                                    ray_origin_z + ray_direction_z * t AS point_z
                             FROM closest_ray_intersections
-                            LEFT JOIN rays_to_trace ON closest_ray_intersections.ray_id = rays_to_trace.ray_id
                         ),
                         intersection_outward_normal AS (
                             SELECT intersection_point.*,
@@ -213,7 +206,7 @@ WITH
                                    (point_y - spheres.center_y) / spheres.radius AS normal_y,
                                    (point_z - spheres.center_z) / spheres.radius AS normal_z
                             FROM intersection_point
-                            LEFT JOIN spheres ON intersection_point.sphere_id = spheres.sphere_id
+                            JOIN spheres ON intersection_point.sphere_id = spheres.sphere_id
                         ),
                         intersection_is_front_face AS (
                             SELECT *,
