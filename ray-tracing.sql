@@ -52,37 +52,47 @@ WITH
         ) AS pixel_xy
     ),
     rays (ray_id, pixel_id, ray_origin_x, ray_origin_y, ray_origin_z, ray_direction_x, ray_direction_y,
-          ray_direction_z) AS (
-        SELECT ray_id,
-               pixel_id,
-               ray_origin_x,
-               ray_origin_y,
-               ray_origin_z,
-               ray_direction_x / SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
-                                      ray_direction_z * ray_direction_z),
-               ray_direction_y / SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
-                                      ray_direction_z * ray_direction_z),
-               ray_direction_z / SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
-                                      ray_direction_z * ray_direction_z)
-        FROM (
-            SELECT y * width + x                                  AS ray_id,
-                   pixel_id,
-                   camera_origin_x                                AS ray_origin_x,
-                   camera_origin_y                                AS ray_origin_y,
-                   camera_origin_z                                AS ray_origin_z,
-                   -camera_origin_x + (u - 0.5) * viewport_width  AS ray_direction_x,
-                   -camera_origin_y + (v - 0.5) * viewport_height AS ray_direction_y,
-                   focal_length - camera_origin_z                 AS ray_direction_z
-            FROM pixel_coordinates,
-                 (
-                     SELECT camera_origin_x, camera_origin_y, camera_origin_z, focal_length, viewport_height, width
-                     FROM settings
-                 ) AS s,
-                 (
-                     SELECT viewport_width
-                     FROM derived_constants
-                 ) AS c
-        ) AS not_normalized_rays
+          ray_direction_z, color_r, color_g, color_b) AS (
+        WITH
+            non_normalized_rays AS (
+                SELECT y * width + x                                  AS ray_id,
+                       pixel_id,
+                       camera_origin_x                                AS ray_origin_x,
+                       camera_origin_y                                AS ray_origin_y,
+                       camera_origin_z                                AS ray_origin_z,
+                       -camera_origin_x + (u - 0.5) * viewport_width  AS ray_direction_x,
+                       -camera_origin_y + (v - 0.5) * viewport_height AS ray_direction_y,
+                       focal_length - camera_origin_z                 AS ray_direction_z
+                FROM pixel_coordinates,
+                     settings,
+                     derived_constants
+            ),
+            rays_with_direction_length AS (
+                SELECT *,
+                       SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
+                            ray_direction_z * ray_direction_z) AS direction_length
+                FROM non_normalized_rays
+            ),
+            normalized_rays AS (
+                SELECT ray_id,
+                       pixel_id,
+                       ray_origin_x,
+                       ray_origin_y,
+                       ray_origin_z,
+                       ray_direction_x / direction_length AS ray_direction_x,
+                       ray_direction_y / direction_length AS ray_direction_y,
+                       ray_direction_z / direction_length AS ray_direction_z
+                FROM rays_with_direction_length
+            ),
+            rays_with_background_color AS (
+                SELECT *,
+                       1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.3 * ((ray_direction_y + 1.0) * 0.5),
+                       1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.5 * ((ray_direction_y + 1.0) * 0.5),
+                       1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.8 * ((ray_direction_y + 1.0) * 0.5)
+                FROM normalized_rays
+            )
+        SELECT *
+        FROM rays_with_background_color
     ),
     closest_ray_intersections (ray_id, sphere_id, t) AS (
         WITH
@@ -139,7 +149,7 @@ WITH
         SELECT *
         FROM closest_sphere_intersection
     ),
-    hit_records (pixel_id, ray_direction_y, hit, normal_x, normal_y, normal_z) AS (
+    hit_records (ray_id, normal_x, normal_y, normal_z) AS (
         WITH
             intersection_point AS (
                 SELECT rays.*,
@@ -179,33 +189,19 @@ WITH
                        is_front_face
                 FROM intersection_is_front_face
             )
-        SELECT pixel_id,
-               ray_direction_y,
-               t IS NOT NULL,
+        SELECT ray_id,
                normal_x,
                normal_y,
                normal_z
-        FROM rays
-        LEFT OUTER JOIN intersections ON rays.ray_id = intersections.ray_id
+        FROM intersections
     ),
     ray_colors (pixel_id, r, g, b) AS (
         SELECT pixel_id,
-               CASE
-                   WHEN hit THEN (normal_x + 1.0) * 0.5
-                   ELSE
-                       1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.3 * ((ray_direction_y + 1.0) * 0.5)
-                   END,
-               CASE
-                   WHEN hit THEN (normal_y + 1.0) * 0.5
-                   ELSE
-                       1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.5 * ((ray_direction_y + 1.0) * 0.5)
-                   END,
-               CASE
-                   WHEN hit THEN (normal_z + 1.0) * 0.5
-                   ELSE
-                       1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.8 * ((ray_direction_y + 1.0) * 0.5)
-                   END
-        FROM hit_records
+               COALESCE((normal_x + 1.0) * 0.5, color_r),
+               COALESCE((normal_y + 1.0) * 0.5, color_g),
+               COALESCE((normal_z + 1.0) * 0.5, color_b)
+        FROM rays
+        LEFT JOIN hit_records ON rays.ray_id = hit_records.ray_id
     ),
     pixels (pixel_id, r, g, b) AS (
         SELECT pixel_id,
