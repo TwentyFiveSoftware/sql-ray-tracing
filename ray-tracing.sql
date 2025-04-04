@@ -1,12 +1,13 @@
-SET SESSION cte_max_recursion_depth = 1000000;
-SET SESSION group_concat_max_len = 1000000000000;
+-- MySQL:
+-- SET SESSION cte_max_recursion_depth = 1000000;
+-- SET SESSION group_concat_max_len = 1000000000000;
 
-# EXPLAIN ANALYZE
+-- render
 WITH
     RECURSIVE
     settings AS (
-        SELECT 100   AS width,
-               70    AS height,
+        SELECT 300   AS width,
+               200   AS height,
                0     AS camera_origin_x,
                0     AS camera_origin_y,
                0     AS camera_origin_z,
@@ -31,13 +32,18 @@ WITH
             FROM settings
         )
     ),
-    pixel_coordinates (x, y, u, v) AS (
-        SELECT x,
+    pixel_coordinates (pixel_id, x, y, u, v) AS (
+        SELECT pixel_id,
+               x,
                y,
                CAST(x AS FLOAT) / (width - 1),
                CAST(y AS FLOAT) / (height - 1)
         FROM (
-            SELECT pixel_id MOD width AS x, FLOOR(pixel_id / width) AS y, width, height
+            SELECT pixel_id,
+                   MOD(pixel_id, width)    AS x,
+                   FLOOR(pixel_id / width) AS y,
+                   width,
+                   height
             FROM pixel_ids,
                  (
                      SELECT width, height
@@ -45,11 +51,10 @@ WITH
                  ) AS dimensions
         ) AS pixel_xy
     ),
-    rays (ray_id, pixel_x, pixel_y, ray_origin_x, ray_origin_y, ray_origin_z, ray_direction_x, ray_direction_y,
+    rays (ray_id, pixel_id, ray_origin_x, ray_origin_y, ray_origin_z, ray_direction_x, ray_direction_y,
           ray_direction_z) AS (
-        SELECT UUID() AS ray_id,
-               pixel_x,
-               pixel_y,
+        SELECT ray_id,
+               pixel_id,
                ray_origin_x,
                ray_origin_y,
                ray_origin_z,
@@ -60,8 +65,8 @@ WITH
                ray_direction_z / SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
                                       ray_direction_z * ray_direction_z)
         FROM (
-            SELECT x                                              AS pixel_x,
-                   y                                              AS pixel_y,
+            SELECT y * width + x                                  AS ray_id,
+                   pixel_id,
                    camera_origin_x                                AS ray_origin_x,
                    camera_origin_y                                AS ray_origin_y,
                    camera_origin_z                                AS ray_origin_z,
@@ -70,7 +75,7 @@ WITH
                    focal_length - camera_origin_z                 AS ray_direction_z
             FROM pixel_coordinates,
                  (
-                     SELECT camera_origin_x, camera_origin_y, camera_origin_z, focal_length, viewport_height
+                     SELECT camera_origin_x, camera_origin_y, camera_origin_z, focal_length, viewport_height, width
                      FROM settings
                  ) AS s,
                  (
@@ -140,9 +145,9 @@ WITH
                point_x,
                point_y,
                point_z,
-               IF(is_front_face, normal_x, -normal_x),
-               IF(is_front_face, normal_y, -normal_y),
-               IF(is_front_face, normal_z, -normal_z),
+               CASE WHEN is_front_face THEN normal_x ELSE -normal_x END,
+               CASE WHEN is_front_face THEN normal_y ELSE -normal_y END,
+               CASE WHEN is_front_face THEN normal_z ELSE -normal_z END,
                is_front_face
         FROM (
             SELECT *,
@@ -167,9 +172,8 @@ WITH
             ) AS ray_collisions_outward_normal
         ) AS ray_collisions_is_front_face
     ),
-    ray_hit_records (pixel_x, pixel_y, ray_direction_y, hit, normal_x, normal_y, normal_z) AS (
-        SELECT pixel_x,
-               pixel_y,
+    ray_hit_records (pixel_id, ray_direction_y, hit, normal_x, normal_y, normal_z) AS (
+        SELECT pixel_id,
                ray_direction_y,
                t IS NOT NULL,
                normal_x,
@@ -178,40 +182,49 @@ WITH
         FROM rays
         LEFT OUTER JOIN ray_collisions ON rays.ray_id = ray_collisions.ray_id
     ),
-    ray_colors (pixel_x, pixel_y, r, g, b) AS (
-        SELECT pixel_x,
-               pixel_y,
-               IF(hit, (normal_x + 1.0) * 0.5,
-                  1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.3 * ((ray_direction_y + 1.0) * 0.5)),
-               IF(hit, (normal_y + 1.0) * 0.5,
-                  1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.5 * ((ray_direction_y + 1.0) * 0.5)),
-               IF(hit, (normal_z + 1.0) * 0.5,
-                  1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.8 * ((ray_direction_y + 1.0) * 0.5))
+    ray_colors (pixel_id, r, g, b) AS (
+        SELECT pixel_id,
+               CASE
+                   WHEN hit THEN (normal_x + 1.0) * 0.5
+                   ELSE
+                       1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.3 * ((ray_direction_y + 1.0) * 0.5)
+                   END,
+               CASE
+                   WHEN hit THEN (normal_y + 1.0) * 0.5
+                   ELSE
+                       1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.5 * ((ray_direction_y + 1.0) * 0.5)
+                   END,
+               CASE
+                   WHEN hit THEN (normal_z + 1.0) * 0.5
+                   ELSE
+                       1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.8 * ((ray_direction_y + 1.0) * 0.5)
+                   END
         FROM ray_hit_records
     ),
-    pixels (x, y, r, g, b) AS (
-        SELECT pixel_x,
-               pixel_y,
+    pixels (pixel_id, r, g, b) AS (
+        SELECT pixel_id,
                FLOOR(r * 0xFF),
                FLOOR(g * 0xFF),
                FLOOR(b * 0xFF)
         FROM ray_colors
     ),
-    image_pixel_rows (image_pixel_row) AS (
+    image_pixel_rgb (rgb) AS (
         SELECT CONCAT(r, ' ', g, ' ', b)
         FROM pixels
-        ORDER BY y, x
+        ORDER BY pixel_id
     ),
-    image_pixels (image_pixels) AS (
-        SELECT GROUP_CONCAT(image_pixel_row SEPARATOR '\n')
-        FROM image_pixel_rows
+    image (image_in_ppm_format) AS (
+--         SELECT CONCAT('P3', '\n', width, ' ', height, '\n', '255', '\n', pixels, '\n') -- MySQL
+        SELECT CONCAT('P3', E'\n', width, ' ', height, E'\n', '255', E'\n', pixels, E'\n') -- Postgres
+        FROM (
+--                  SELECT GROUP_CONCAT(rgb SEPARATOR '\n') AS pixels -- MySQL
+                 SELECT STRING_AGG(rgb, E'\n') AS pixels -- Postgres
+                 FROM image_pixel_rgb
+             ) AS p,
+             (
+                 SELECT width, height
+                 FROM settings
+             ) AS dimensions
     )
-SELECT CONCAT('P3\n',
-              (
-                  SELECT CONCAT(width, ' ', height)
-                  FROM settings
-              ),
-              '\n255\n',
-              image_pixels) AS image_in_ppm_format
-# INTO OUTFILE '/var/lib/mysql-files/render.ppm' FIELDS TERMINATED BY '' ESCAPED BY '' LINES TERMINATED BY '\n'
-FROM image_pixels;
+SELECT image_in_ppm_format
+FROM image

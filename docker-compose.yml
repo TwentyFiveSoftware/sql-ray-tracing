@@ -10,5 +10,11 @@ services:
       MYSQL_DATABASE: ray-tracing
     ports:
       - '3306:3306'
-    volumes:
-      - './output:/var/lib/mysql-files'
+
+  postgres:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: super-secret-password
+    ports:
+      - '5432:5432'
