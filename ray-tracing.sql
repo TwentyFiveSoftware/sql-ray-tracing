@@ -16,7 +16,8 @@ WITH
                0.001 AS sphere_collision_t_min,
                1     AS max_depth
     ),
-    spheres (sphere_id, center_x, center_y, center_z, radius, material_type, albedo_r, albedo_g, albedo_b) AS (
+    spheres (sphere_id, sphere_center_x, sphere_center_y, sphere_center_z, sphere_radius, sphere_material_type,
+             sphere_albedo_r, sphere_albedo_g, sphere_albedo_b) AS (
         SELECT 0, 0, 0, 1, 0.5, 0, 0.9, 0.9, 0.9
     ),
     derived_constants AS (
@@ -142,16 +143,16 @@ WITH
                     WITH
                         sphere_intersection_calc AS (
                             SELECT rays_to_trace.*,
-                                   sphere_id,
+                                   spheres.*,
                                    ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
-                                   ray_direction_z * ray_direction_z                   AS a,
-                                   (ray_origin_x - spheres.center_x) * ray_direction_x +
-                                   (ray_origin_y - spheres.center_y) * ray_direction_y +
-                                   (ray_origin_z - spheres.center_z) * ray_direction_z AS half_b,
-                                   ((ray_origin_x - spheres.center_x) * (ray_origin_x - spheres.center_x) +
-                                    (ray_origin_y - spheres.center_y) * (ray_origin_y - spheres.center_y) +
-                                    (ray_origin_z - spheres.center_z) * (ray_origin_z - spheres.center_z)) -
-                                   spheres.radius * spheres.radius                     AS c
+                                   ray_direction_z * ray_direction_z                  AS a,
+                                   (ray_origin_x - sphere_center_x) * ray_direction_x +
+                                   (ray_origin_y - sphere_center_y) * ray_direction_y +
+                                   (ray_origin_z - sphere_center_z) * ray_direction_z AS half_b,
+                                   ((ray_origin_x - sphere_center_x) * (ray_origin_x - sphere_center_x) +
+                                    (ray_origin_y - sphere_center_y) * (ray_origin_y - sphere_center_y) +
+                                    (ray_origin_z - sphere_center_z) * (ray_origin_z - sphere_center_z)) -
+                                   sphere_radius * sphere_radius                      AS c
                             FROM rays_to_trace,
                                  spheres
                         ),
@@ -202,11 +203,10 @@ WITH
                         ),
                         intersection_outward_normal AS (
                             SELECT intersection_point.*,
-                                   (point_x - spheres.center_x) / spheres.radius AS normal_x,
-                                   (point_y - spheres.center_y) / spheres.radius AS normal_y,
-                                   (point_z - spheres.center_z) / spheres.radius AS normal_z
+                                   (point_x - sphere_center_x) / sphere_radius AS normal_x,
+                                   (point_y - sphere_center_y) / sphere_radius AS normal_y,
+                                   (point_z - sphere_center_z) / sphere_radius AS normal_z
                             FROM intersection_point
-                            JOIN spheres ON intersection_point.sphere_id = spheres.sphere_id
                         ),
                         intersection_is_front_face AS (
                             SELECT *,
