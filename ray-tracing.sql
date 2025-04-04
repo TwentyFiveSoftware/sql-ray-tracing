@@ -8,21 +8,111 @@ WITH
     settings AS (
         SELECT 800   AS width,
                600   AS height,
-               0.0   AS camera_origin_x,
-               0.0   AS camera_origin_y,
-               0.0   AS camera_origin_z,
-               2.0   AS viewport_height,
-               1.0   AS focal_length,
-               0.001 AS sphere_collision_t_min,
-               10    AS max_depth
+               10    AS max_depth,
+               0.0   AS camera_look_from_x,
+               0.0   AS camera_look_from_y,
+               -4.0  AS camera_look_from_z,
+               0.0   AS camera_look_at_x,
+               0.0   AS camera_look_at_y,
+               0.0   AS camera_look_at_z,
+               25.0  AS camera_fov,
+               0.001 AS sphere_collision_t_min
     ),
     spheres (sphere_id, sphere_center_x, sphere_center_y, sphere_center_z, sphere_radius, sphere_material_type,
              sphere_albedo_r, sphere_albedo_g, sphere_albedo_b) AS (
-        SELECT 0, 0, 0, 1, 0.5, 'DIFFUSE', 0.9, 0.9, 0.9
+        SELECT 0,
+               0,
+               0,
+               1,
+               0.5,
+               'DIFFUSE',
+               0.9,
+               0.9,
+               0.9
+        UNION ALL
+        SELECT 1,
+               0,
+               -1000.5,
+               0,
+               1000,
+               'DIFFUSE',
+               0.3,
+               0.3,
+               0.3
     ),
-    derived_constants AS (
-        SELECT CAST(width AS FLOAT) / height * viewport_height AS viewport_width
-        FROM settings
+    camera AS (
+        WITH
+            camera_viewport_height (viewport_height) AS (
+                SELECT TAN(RADIANS(camera_fov) / 2.0) * 2.0
+                FROM settings
+            ),
+            camera_viewport_width (viewport_width) AS (
+                SELECT CAST(width AS FLOAT) / height * viewport_height AS viewport_width
+                FROM settings,
+                     camera_viewport_height
+            ),
+            camera_forward (forward_x, forward_y, forward_z) AS (
+                WITH
+                    forward_non_normalized (forward_x, forward_y, forward_z) AS (
+                        SELECT camera_look_at_x - camera_look_from_x,
+                               camera_look_at_y - camera_look_from_y,
+                               camera_look_at_z - camera_look_from_z
+                        FROM settings
+                    )
+                SELECT forward_x / SQRT(forward_x * forward_x + forward_y * forward_y + forward_z * forward_z),
+                       forward_y / SQRT(forward_x * forward_x + forward_y * forward_y + forward_z * forward_z),
+                       forward_z / SQRT(forward_x * forward_x + forward_y * forward_y + forward_z * forward_z)
+                FROM forward_non_normalized
+            ),
+            camera_right (right_x, right_y, right_z) AS (
+                WITH
+                    right_non_normalized (right_x, right_y, right_z) AS (
+                        SELECT forward_z, 0, - forward_x
+                        FROM camera_forward
+                    )
+                SELECT right_x / SQRT(right_x * right_x + right_y * right_y + right_z * right_z),
+                       right_y / SQRT(right_x * right_x + right_y * right_y + right_z * right_z),
+                       right_z / SQRT(right_x * right_x + right_y * right_y + right_z * right_z)
+                FROM right_non_normalized
+            ),
+            camera_up (up_x, up_y, up_z) AS (
+                WITH
+                    up_non_normalized (up_x, up_y, up_z) AS (
+                        SELECT (forward_y * right_z) - (forward_z * right_y),
+                               (forward_z * right_x) - (forward_x * right_z),
+                               (forward_x * right_y) - (forward_y * right_x)
+                        FROM camera_forward,
+                             camera_right
+                    )
+                SELECT up_x / (up_x * up_x + up_y * up_y + up_z * up_z),
+                       up_y / (up_x * up_x + up_y * up_y + up_z * up_z),
+                       up_z / (up_x * up_x + up_y * up_y + up_z * up_z)
+                FROM up_non_normalized
+            ),
+            camera_directions (horizontal_direction_x, horizontal_direction_y, horizontal_direction_z,
+                               vertical_direction_x, vertical_direction_y, vertical_direction_z) AS (
+                SELECT right_x * viewport_width,
+                       right_y * viewport_width,
+                       right_z * viewport_width,
+                       up_x * viewport_height,
+                       up_y * viewport_height,
+                       up_z * viewport_height
+                FROM camera_viewport_width,
+                     camera_viewport_height,
+                     camera_right,
+                     camera_up
+            ),
+            camera_upper_left_corner (upper_left_corner_x, upper_left_corner_y, upper_left_corner_z) AS (
+                SELECT camera_look_from_x - horizontal_direction_x / 2.0 + vertical_direction_x / 2.0 + forward_x,
+                       camera_look_from_y - horizontal_direction_y / 2.0 + vertical_direction_y / 2.0 + forward_y,
+                       camera_look_from_z - horizontal_direction_z / 2.0 + vertical_direction_z / 2.0 + forward_z
+                FROM settings,
+                     camera_directions,
+                     camera_forward
+            )
+        SELECT camera_directions.*, camera_upper_left_corner.*
+        FROM camera_directions,
+             camera_upper_left_corner
     ),
     pixel_ids (pixel_id) AS (
         SELECT 0
@@ -57,41 +147,38 @@ WITH
           ray_direction_y, ray_direction_z, ray_color_r, ray_color_g, ray_color_b) AS (
         -- initial rays (origin at the camera):
         WITH
-            non_normalized_rays AS (
+            camera_rays AS (
+                WITH
+                    non_normalized_camera_ray_directions (pixel_id, ray_direction_x, ray_direction_y, ray_direction_z)
+                        AS (
+                        SELECT pixel_id,
+                               upper_left_corner_x + horizontal_direction_x * u - vertical_direction_x * v -
+                               camera_look_from_x,
+                               upper_left_corner_y + horizontal_direction_y * u - vertical_direction_y * v -
+                               camera_look_from_y,
+                               upper_left_corner_z + horizontal_direction_z * u - vertical_direction_z * v -
+                               camera_look_from_z
+                        FROM pixel_coordinates,
+                             camera,
+                             settings
+                    )
                 SELECT pixel_id,
-                       pixel_id * (max_depth + 1)                     AS ray_id,
-                       0                                              AS ray_depth,
-                       TRUE                                           AS should_trace,
-                       CAST(camera_origin_x AS FLOAT)                 AS ray_origin_x,
-                       CAST(camera_origin_y AS FLOAT)                 AS ray_origin_y,
-                       CAST(camera_origin_z AS FLOAT)                 AS ray_origin_z,
-                       -camera_origin_x + (u - 0.5) * viewport_width  AS ray_direction_x,
-                       -camera_origin_y + (v - 0.5) * viewport_height AS ray_direction_y,
-                       focal_length - camera_origin_z                 AS ray_direction_z
-                FROM pixel_coordinates,
-                     settings,
-                     derived_constants
+                       pixel_id * (max_depth + 1)                                AS ray_id,
+                       0                                                         AS ray_depth,
+                       TRUE                                                      AS should_trace,
+                       CAST(camera_look_from_x AS FLOAT)                         AS ray_origin_x,
+                       CAST(camera_look_from_y AS FLOAT)                         AS ray_origin_y,
+                       CAST(camera_look_from_z AS FLOAT)                         AS ray_origin_z,
+                       ray_direction_x / SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
+                                              ray_direction_z * ray_direction_z) AS ray_direction_x,
+                       ray_direction_y / SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
+                                              ray_direction_z * ray_direction_z) AS ray_direction_y,
+                       ray_direction_z / SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
+                                              ray_direction_z * ray_direction_z) AS ray_direction_z
+                FROM non_normalized_camera_ray_directions,
+                     settings
             ),
-            rays_with_direction_length AS (
-                SELECT *,
-                       SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
-                            ray_direction_z * ray_direction_z) AS direction_length
-                FROM non_normalized_rays
-            ),
-            normalized_rays AS (
-                SELECT pixel_id,
-                       ray_id,
-                       ray_depth,
-                       should_trace,
-                       ray_origin_x,
-                       ray_origin_y,
-                       ray_origin_z,
-                       ray_direction_x / direction_length AS ray_direction_x,
-                       ray_direction_y / direction_length AS ray_direction_y,
-                       ray_direction_z / direction_length AS ray_direction_z
-                FROM rays_with_direction_length
-            ),
-            rays_with_background_color AS (
+            camera_rays_with_background_color AS (
                 SELECT *,
                        1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5))
                            + 0.3 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_r,
@@ -99,10 +186,10 @@ WITH
                            + 0.5 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_g,
                        1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5))
                            + 0.8 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_b
-                FROM normalized_rays
+                FROM camera_rays
             )
         SELECT *
-        FROM rays_with_background_color
+        FROM camera_rays_with_background_color
 
         UNION ALL
 
