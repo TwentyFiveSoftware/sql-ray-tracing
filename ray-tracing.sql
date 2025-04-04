@@ -8,17 +8,17 @@ WITH
     settings AS (
         SELECT 800   AS width,
                600   AS height,
-               0     AS camera_origin_x,
-               0     AS camera_origin_y,
-               0     AS camera_origin_z,
+               0.0   AS camera_origin_x,
+               0.0   AS camera_origin_y,
+               0.0   AS camera_origin_z,
                2.0   AS viewport_height,
                1.0   AS focal_length,
                0.001 AS sphere_collision_t_min,
-               1     AS max_depth
+               10    AS max_depth
     ),
     spheres (sphere_id, sphere_center_x, sphere_center_y, sphere_center_z, sphere_radius, sphere_material_type,
              sphere_albedo_r, sphere_albedo_g, sphere_albedo_b) AS (
-        SELECT 0, 0, 0, 1, 0.5, 0, 0.9, 0.9, 0.9
+        SELECT 0, 0, 0, 1, 0.5, 'DIFFUSE', 0.9, 0.9, 0.9
     ),
     derived_constants AS (
         SELECT CAST(width AS FLOAT) / height * viewport_height AS viewport_width
@@ -62,9 +62,9 @@ WITH
                        pixel_id * (max_depth + 1)                     AS ray_id,
                        0                                              AS ray_depth,
                        TRUE                                           AS should_trace,
-                       camera_origin_x                                AS ray_origin_x,
-                       camera_origin_y                                AS ray_origin_y,
-                       camera_origin_z                                AS ray_origin_z,
+                       CAST(camera_origin_x AS FLOAT)                 AS ray_origin_x,
+                       CAST(camera_origin_y AS FLOAT)                 AS ray_origin_y,
+                       CAST(camera_origin_z AS FLOAT)                 AS ray_origin_z,
                        -camera_origin_x + (u - 0.5) * viewport_width  AS ray_direction_x,
                        -camera_origin_y + (v - 0.5) * viewport_height AS ray_direction_y,
                        focal_length - camera_origin_z                 AS ray_direction_z
@@ -134,7 +134,7 @@ WITH
                     WHERE ray_depth < max_depth
                 ),
                 rays_exceeding_depth_limit AS (
-                    SELECT last_ray_per_pixel.*
+                    SELECT pixel_id, ray_id, ray_depth
                     FROM last_ray_per_pixel,
                          settings
                     WHERE ray_depth >= max_depth
@@ -198,7 +198,7 @@ WITH
                     SELECT *
                     FROM closest_sphere_intersection
                 ),
-                hit_records (pixel_id, ray_id, ray_depth, normal_x, normal_y, normal_z) AS (
+                hit_records AS (
                     WITH
                         intersection_point AS (
                             SELECT *,
@@ -209,61 +209,75 @@ WITH
                         ),
                         intersection_outward_normal AS (
                             SELECT intersection_point.*,
-                                   (point_x - sphere_center_x) / sphere_radius AS normal_x,
-                                   (point_y - sphere_center_y) / sphere_radius AS normal_y,
-                                   (point_z - sphere_center_z) / sphere_radius AS normal_z
+                                   (point_x - sphere_center_x) / sphere_radius AS outward_normal_x,
+                                   (point_y - sphere_center_y) / sphere_radius AS outward_normal_y,
+                                   (point_z - sphere_center_z) / sphere_radius AS outward_normal_z
                             FROM intersection_point
                         ),
                         intersection_is_front_face AS (
                             SELECT *,
-                                   ray_direction_x * normal_x + ray_direction_y * normal_y +
-                                   ray_direction_z * normal_z <
+                                   ray_direction_x * outward_normal_x + ray_direction_y * outward_normal_y +
+                                   ray_direction_z * outward_normal_z <
                                    0.0 AS is_front_face
                             FROM intersection_outward_normal
                         ),
-                        intersections (pixel_id, ray_id, ray_depth, sphere_id, t, point_x, point_y, point_z, normal_x,
-                                       normal_y, normal_z,
-                                       is_front_face)
-                            AS (
-                            SELECT pixel_id,
-                                   ray_id,
-                                   ray_depth,
-                                   sphere_id,
-                                   t,
-                                   point_x,
-                                   point_y,
-                                   point_z,
-                                   CASE WHEN is_front_face THEN normal_x ELSE -normal_x END,
-                                   CASE WHEN is_front_face THEN normal_y ELSE -normal_y END,
-                                   CASE WHEN is_front_face THEN normal_z ELSE -normal_z END,
-                                   is_front_face
+                        intersections AS (
+                            SELECT *,
+                                   CASE WHEN is_front_face THEN outward_normal_x ELSE -outward_normal_x END AS normal_x,
+                                   CASE WHEN is_front_face THEN outward_normal_y ELSE -outward_normal_y END AS normal_y,
+                                   CASE WHEN is_front_face THEN outward_normal_z ELSE -outward_normal_z END AS normal_z
                             FROM intersection_is_front_face
                         )
-                    SELECT pixel_id,
-                           ray_id,
-                           ray_depth,
-                           normal_x,
-                           normal_y,
-                           normal_z
+                    SELECT *
                     FROM intersections
+--                     SELECT pixel_id,
+--                            ray_id,
+--                            ray_depth,
+--                            ray_color_r * sphere_albedo_r AS new_color_r,
+--                            ray_color_g * sphere_albedo_g AS new_color_g,
+--                            ray_color_b * sphere_albedo_b AS new_color_b
+--                     FROM intersections
+                ),
+                scattered_diffuse_rays AS (
+                    WITH
+                        RECURSIVE
+                        random_unit_vectors(x, y, z) AS (
+                            SELECT RANDOM() * 2.0 - 1.0 AS x, RANDOM() * 2.0 - 1.0 AS y, RANDOM() * 2.0 - 1.0 AS z
+                            UNION ALL
+                            SELECT RANDOM() * 2.0 - 1.0 AS x, RANDOM() * 2.0 - 1.0 AS y, RANDOM() * 2.0 - 1.0 AS z
+                            FROM random_unit_vectors
+                            WHERE x * x + y * y + z * z > 1
+                               OR x + y + z = 0
+                        ),
+                        random_unit_vector (x, y, z) AS (
+                            SELECT x / SQRT(x * x + y * y + z * z),
+                                   y / SQRT(x * x + y * y + z * z),
+                                   z / SQRT(x * x + y * y + z * z)
+                            FROM random_unit_vectors
+                            WHERE x * x + y * y + z * z <= 1
+                              AND x + y + z <> 0
+                            LIMIT 1
+                        )
+                    SELECT pixel_id,
+                           ray_id + 1                    AS ray_id,
+                           ray_depth + 1                 AS ray_depth,
+                           TRUE                          AS should_trace,
+                           point_x                       AS ray_origin_x,
+                           point_y                       AS ray_origin_y,
+                           point_z                       AS ray_origin_z,
+                           random_unit_vector.x          AS ray_direction_x,
+                           random_unit_vector.y          AS ray_direction_y,
+                           random_unit_vector.z          AS ray_direction_z,
+                           ray_color_r * sphere_albedo_r AS ray_color_r,
+                           ray_color_g * sphere_albedo_g AS ray_color_g,
+                           ray_color_b * sphere_albedo_b AS ray_color_b
+                    FROM hit_records,
+                         random_unit_vector
+                    WHERE sphere_material_type = 'DIFFUSE'
                 ),
                 new_rays AS (
-                    (
-                        SELECT pixel_id,
-                               ray_id + 1             AS ray_id,
-                               ray_depth + 1          AS ray_depth,
-                               FALSE                  AS should_trace,
-                               0,
-                               0,
-                               0,
-                               0,
-                               0,
-                               0,
-                               (normal_x + 1.0) * 0.5 AS ray_color_r,
-                               (normal_y + 1.0) * 0.5 AS ray_color_g,
-                               (normal_z + 1.0) * 0.5 AS ray_color_b
-                        FROM hit_records
-                    )
+                    SELECT *
+                    FROM scattered_diffuse_rays
                     UNION ALL
                     (
                         SELECT pixel_id,
@@ -279,7 +293,14 @@ WITH
                                0,
                                0,
                                0
-                        FROM rays_exceeding_depth_limit
+                        FROM (
+                            SELECT pixel_id, ray_id, ray_depth
+                            FROM rays_exceeding_depth_limit
+                            UNION ALL
+                            SELECT pixel_id, ray_id, ray_depth
+                            FROM hit_records
+                            WHERE sphere_material_type <> 'DIFFUSE'
+                        ) AS _
                     )
                 )
             SELECT *
