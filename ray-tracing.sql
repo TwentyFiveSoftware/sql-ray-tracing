@@ -1,52 +1,53 @@
 SET SESSION cte_max_recursion_depth = 1000000;
 SET SESSION group_concat_max_len = 1000000000000;
 
-SET @WIDTH = 300;
-SET @HEIGHT = 200;
-
-SET @CAMERA_ORIGIN_X = 0;
-SET @CAMERA_ORIGIN_Y = 0;
-SET @CAMERA_ORIGIN_Z = 0;
-
-SET @VIEWPORT_HEIGHT = 2.0;
-SET @FOCAL_LENGTH = 1.0;
-
-SET @ASPECT_RATIO = CAST(@WIDTH AS FLOAT) / @HEIGHT;
-SET @VIEWPORT_WIDTH = @ASPECT_RATIO * @VIEWPORT_HEIGHT;
-
-SET @CAMERA_UPPER_LEFT_CORNER_X = @VIEWPORT_WIDTH * -0.5 - @CAMERA_ORIGIN_X;
-SET @CAMERA_UPPER_LEFT_CORNER_Y = @VIEWPORT_HEIGHT * -0.5 - @CAMERA_ORIGIN_Y;
-SET @CAMERA_UPPER_LEFT_CORNER_Z = @FOCAL_LENGTH - @CAMERA_ORIGIN_Z;
-
-SET @SPHERE_COLLISION_T_MIN = 0.001;
-
 # EXPLAIN ANALYZE
 WITH
     RECURSIVE
+    settings AS (
+        SELECT 100   AS width,
+               70    AS height,
+               0     AS camera_origin_x,
+               0     AS camera_origin_y,
+               0     AS camera_origin_z,
+               2.0   AS viewport_height,
+               1.0   AS focal_length,
+               0.001 AS sphere_collision_t_min
+    ),
     spheres (sphere_id, center_x, center_y, center_z, radius) AS (
         SELECT 0, 0, 0, 1, 0.5
+    ),
+    derived_constants AS (
+        SELECT CAST(width AS FLOAT) / height * viewport_height AS viewport_width
+        FROM settings
     ),
     pixel_ids (pixel_id) AS (
         SELECT 0
         UNION ALL
         SELECT pixel_id + 1
         FROM pixel_ids
-        WHERE pixel_id + 1 < @WIDTH * @HEIGHT
+        WHERE pixel_id + 1 < (
+            SELECT width * height
+            FROM settings
+        )
     ),
-    pixel_coordinates (x, y) AS (
-        SELECT pixel_id MOD @WIDTH, FLOOR(pixel_id / @WIDTH)
-        FROM pixel_ids
-    ),
-    pixel_uv (x, y, u, v) AS (
+    pixel_coordinates (x, y, u, v) AS (
         SELECT x,
                y,
-               CAST(x AS FLOAT) / (@WIDTH - 1),
-               CAST(y AS FLOAT) / (@HEIGHT - 1)
-        FROM pixel_coordinates
+               CAST(x AS FLOAT) / (width - 1),
+               CAST(y AS FLOAT) / (height - 1)
+        FROM (
+            SELECT pixel_id MOD width AS x, FLOOR(pixel_id / width) AS y, width, height
+            FROM pixel_ids,
+                 (
+                     SELECT width, height
+                     FROM settings
+                 ) AS dimensions
+        ) AS pixel_xy
     ),
     rays (ray_id, pixel_x, pixel_y, ray_origin_x, ray_origin_y, ray_origin_z, ray_direction_x, ray_direction_y,
           ray_direction_z) AS (
-        SELECT ray_id,
+        SELECT UUID() AS ray_id,
                pixel_x,
                pixel_y,
                ray_origin_x,
@@ -59,16 +60,23 @@ WITH
                ray_direction_z / SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
                                       ray_direction_z * ray_direction_z)
         FROM (
-            SELECT y * @WIDTH + x                                     AS ray_id,
-                   x                                                  AS pixel_x,
-                   y                                                  AS pixel_y,
-                   @CAMERA_ORIGIN_X                                   AS ray_origin_x,
-                   @CAMERA_ORIGIN_Y                                   AS ray_origin_y,
-                   @CAMERA_ORIGIN_Z                                   AS ray_origin_z,
-                   @CAMERA_UPPER_LEFT_CORNER_X + @VIEWPORT_WIDTH * u  AS ray_direction_x,
-                   @CAMERA_UPPER_LEFT_CORNER_Y + @VIEWPORT_HEIGHT * v AS ray_direction_y,
-                   @CAMERA_UPPER_LEFT_CORNER_Z                        AS ray_direction_z
-            FROM pixel_uv
+            SELECT x                                              AS pixel_x,
+                   y                                              AS pixel_y,
+                   camera_origin_x                                AS ray_origin_x,
+                   camera_origin_y                                AS ray_origin_y,
+                   camera_origin_z                                AS ray_origin_z,
+                   -camera_origin_x + (u - 0.5) * viewport_width  AS ray_direction_x,
+                   -camera_origin_y + (v - 0.5) * viewport_height AS ray_direction_y,
+                   focal_length - camera_origin_z                 AS ray_direction_z
+            FROM pixel_coordinates,
+                 (
+                     SELECT camera_origin_x, camera_origin_y, camera_origin_z, focal_length, viewport_height
+                     FROM settings
+                 ) AS s,
+                 (
+                     SELECT viewport_width
+                     FROM derived_constants
+                 ) AS c
         ) AS not_normalized_rays
     ),
     ray_sphere_collisions_discriminant (ray_id, sphere_id, a, half_b, c, discriminant) AS (
@@ -102,11 +110,15 @@ WITH
         SELECT ray_id,
                sphere_id,
                CASE
-                   WHEN root_1 > @SPHERE_COLLISION_T_MIN AND root_1 <= root_2 THEN root_1
-                   WHEN root_2 > @SPHERE_COLLISION_T_MIN AND root_2 < root_1 THEN root_2
+                   WHEN root_1 > sphere_collision_t_min AND root_1 <= root_2 THEN root_1
+                   WHEN root_2 > sphere_collision_t_min AND root_2 < root_1 THEN root_2
                    ELSE -1.0
                    END
-        FROM ray_sphere_collisions_roots
+        FROM ray_sphere_collisions_roots,
+             (
+                 SELECT sphere_collision_t_min
+                 FROM settings
+             ) AS s
     ),
     ray_collisions_closest (ray_id, sphere_id, t) AS (
         SELECT ray_sphere_collisions_t.ray_id,
@@ -194,6 +206,12 @@ WITH
         SELECT GROUP_CONCAT(image_pixel_row SEPARATOR '\n')
         FROM image_pixel_rows
     )
-SELECT CONCAT('P3\n', @WIDTH, ' ', @HEIGHT, '\n255\n', image_pixels)
+SELECT CONCAT('P3\n',
+              (
+                  SELECT CONCAT(width, ' ', height)
+                  FROM settings
+              ),
+              '\n255\n',
+              image_pixels) AS image_in_ppm_format
 # INTO OUTFILE '/var/lib/mysql-files/render.ppm' FIELDS TERMINATED BY '' ESCAPED BY '' LINES TERMINATED BY '\n'
 FROM image_pixels;
