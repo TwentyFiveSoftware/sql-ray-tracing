@@ -6,8 +6,8 @@
 WITH
     RECURSIVE
     settings AS (
-        SELECT 300   AS width,
-               200   AS height,
+        SELECT 800   AS width,
+               600   AS height,
                0     AS camera_origin_x,
                0     AS camera_origin_y,
                0     AS camera_origin_z,
@@ -179,15 +179,21 @@ WITH
                                  settings
                         ),
                         closest_sphere_intersection AS (
-                            SELECT sphere_intersection_t.*
+                            -- Postgres only, but much faster:
+                            SELECT DISTINCT ON (ray_id) *
                             FROM sphere_intersection_t
-                            JOIN (
-                                SELECT ray_id, MIN(t) AS t
-                                FROM sphere_intersection_t
-                                WHERE t >= 0.0
-                                GROUP BY ray_id
-                            ) lowest_t ON sphere_intersection_t.ray_id = lowest_t.ray_id AND
-                                          sphere_intersection_t.t = lowest_t.t
+                            WHERE t >= 0.0
+                            ORDER BY ray_id, t
+
+--                             SELECT sphere_intersection_t.*
+--                             FROM sphere_intersection_t
+--                             JOIN (
+--                                 SELECT ray_id, MIN(t) AS t
+--                                 FROM sphere_intersection_t
+--                                 WHERE t >= 0.0
+--                                 GROUP BY ray_id
+--                             ) lowest_t ON sphere_intersection_t.ray_id = lowest_t.ray_id AND
+--                                           sphere_intersection_t.t = lowest_t.t
                         )
                     SELECT *
                     FROM closest_sphere_intersection
@@ -281,17 +287,25 @@ WITH
         ) AS _
     ),
     pixels (pixel_id, r, g, b) AS (
-        SELECT rays.pixel_id,
-               FLOOR(ray_color_r * 0xFF),
-               FLOOR(ray_color_g * 0xFF),
-               FLOOR(ray_color_b * 0xFF)
-        FROM (
-            SELECT pixel_id,
-                   MAX(ray_depth) AS depth
-            FROM rays
-            GROUP BY pixel_id
-        ) AS last_ray
-        JOIN rays ON last_ray.pixel_id = rays.pixel_id AND last_ray.depth = rays.ray_depth
+        -- Postgres only, but much faster:
+        SELECT DISTINCT ON (pixel_id) pixel_id,
+                                      FLOOR(ray_color_r * 0xFF),
+                                      FLOOR(ray_color_g * 0xFF),
+                                      FLOOR(ray_color_b * 0xFF)
+        FROM rays
+        ORDER BY pixel_id, ray_depth DESC
+
+--         SELECT rays.pixel_id,
+--                FLOOR(ray_color_r * 0xFF),
+--                FLOOR(ray_color_g * 0xFF),
+--                FLOOR(ray_color_b * 0xFF)
+--         FROM (
+--             SELECT pixel_id,
+--                    MAX(ray_depth) AS depth
+--             FROM rays
+--             GROUP BY pixel_id
+--         ) AS last_ray
+--         JOIN rays ON last_ray.pixel_id = rays.pixel_id AND last_ray.depth = rays.ray_depth
     ),
     image_pixel_rgb (rgb) AS (
         SELECT CONCAT(r, ' ', g, ' ', b)
