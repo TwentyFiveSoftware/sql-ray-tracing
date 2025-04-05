@@ -1,14 +1,9 @@
--- MySQL:
--- SET SESSION cte_max_recursion_depth = 1000000;
--- SET SESSION group_concat_max_len = 1000000000000;
-
--- render
 WITH
     RECURSIVE
     settings AS (
-        SELECT 300   AS width,
-               200   AS height,
-               10    AS samples_per_pixel,
+        SELECT 800   AS width,
+               450   AS height,
+               1     AS samples_per_pixel,
                50    AS max_depth,
                12.0  AS camera_look_from_x,
                2.0   AS camera_look_from_y,
@@ -334,52 +329,54 @@ WITH
     rays (pixel_id, sample_id, ray_depth, should_trace, ray_origin_x, ray_origin_y, ray_origin_z, ray_direction_x,
           ray_direction_y, ray_direction_z, ray_color_r, ray_color_g, ray_color_b) AS (
         -- initial rays (origin at the camera):
-        WITH
-            camera_rays AS (
-                WITH
-                    ray_directions_non_normalized AS (
-                        SELECT *,
-                               upper_left_corner_x + horizontal_direction_x * u - vertical_direction_x * v -
-                               camera_look_from_x AS direction_x,
-                               upper_left_corner_y + horizontal_direction_y * u - vertical_direction_y * v -
-                               camera_look_from_y AS direction_y,
-                               upper_left_corner_z + horizontal_direction_z * u - vertical_direction_z * v -
-                               camera_look_from_z AS direction_z
-                        FROM pixels,
-                             camera,
-                             settings
-                    ),
-                    ray_directions_length AS (
-                        SELECT *,
-                               SQRT(direction_x * direction_x + direction_y * direction_y +
-                                    direction_z * direction_z) AS direction_length
-                        FROM ray_directions_non_normalized
-                    ),
-                    ray_directions AS (
-                        SELECT *,
-                               direction_x / direction_length AS ray_direction_x,
-                               direction_y / direction_length AS ray_direction_y,
-                               direction_z / direction_length AS ray_direction_z
-                        FROM ray_directions_length
-                    )
-                SELECT pixel_id,
-                       sample_id,
-                       0                                 AS ray_depth,
-                       TRUE                              AS should_trace,
-                       CAST(camera_look_from_x AS FLOAT) AS ray_origin_x,
-                       CAST(camera_look_from_y AS FLOAT) AS ray_origin_y,
-                       CAST(camera_look_from_z AS FLOAT) AS ray_origin_z,
-                       ray_direction_x,
-                       ray_direction_y,
-                       ray_direction_z
-                FROM ray_directions
-            )
-        -- background color interpolation:
-        SELECT *,
-               1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.3 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_r,
-               1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.5 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_g,
-               1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.8 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_b
-        FROM camera_rays
+        (
+            WITH
+                camera_rays AS (
+                    WITH
+                        ray_directions_non_normalized AS (
+                            SELECT *,
+                                   upper_left_corner_x + horizontal_direction_x * u - vertical_direction_x * v -
+                                   camera_look_from_x AS direction_x,
+                                   upper_left_corner_y + horizontal_direction_y * u - vertical_direction_y * v -
+                                   camera_look_from_y AS direction_y,
+                                   upper_left_corner_z + horizontal_direction_z * u - vertical_direction_z * v -
+                                   camera_look_from_z AS direction_z
+                            FROM pixels,
+                                 camera,
+                                 settings
+                        ),
+                        ray_directions_length AS (
+                            SELECT *,
+                                   SQRT(direction_x * direction_x + direction_y * direction_y +
+                                        direction_z * direction_z) AS direction_length
+                            FROM ray_directions_non_normalized
+                        ),
+                        ray_directions AS (
+                            SELECT *,
+                                   direction_x / direction_length AS ray_direction_x,
+                                   direction_y / direction_length AS ray_direction_y,
+                                   direction_z / direction_length AS ray_direction_z
+                            FROM ray_directions_length
+                        )
+                    SELECT pixel_id,
+                           sample_id,
+                           0                                 AS ray_depth,
+                           TRUE                              AS should_trace,
+                           CAST(camera_look_from_x AS FLOAT) AS ray_origin_x,
+                           CAST(camera_look_from_y AS FLOAT) AS ray_origin_y,
+                           CAST(camera_look_from_z AS FLOAT) AS ray_origin_z,
+                           ray_direction_x,
+                           ray_direction_y,
+                           ray_direction_z
+                    FROM ray_directions
+                )
+            -- background color interpolation:
+            SELECT *,
+                   1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.3 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_r,
+                   1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.5 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_g,
+                   1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.8 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_b
+            FROM camera_rays
+        )
 
         UNION ALL
 
@@ -761,7 +758,7 @@ WITH
             FROM new_rays
         ) AS _
     ),
-    pixel_colors (rgb) AS (
+    pixel_colors (pixel_id, rgb) AS (
         WITH
             ray_colors (pixel_id, sample_id, r, g, b) AS (
                 -- Postgres only:
@@ -776,19 +773,18 @@ WITH
             ),
             processed_pixel_colors (pixel_id, r, g, b) AS (
                 SELECT pixel_id,
-                       FLOOR(SQRT(r) * 0xFF),
-                       FLOOR(SQRT(g) * 0xFF),
-                       FLOOR(SQRT(b) * 0xFF)
+                       FLOOR(SQRT(r) * 255),
+                       FLOOR(SQRT(g) * 255),
+                       FLOOR(SQRT(b) * 255)
                 FROM raw_pixel_colors
             )
-        SELECT CONCAT(r, ' ', g, ' ', b) AS rgb
+        SELECT pixel_id, CONCAT(r, ' ', g, ' ', b) AS rgb
         FROM processed_pixel_colors
-        ORDER BY pixel_id
     ),
     image (image_in_ppm_format) AS (
         WITH
             pixels_concatenated AS (
-                SELECT STRING_AGG(rgb, E'\n') AS pixels -- Postgres
+                SELECT STRING_AGG(rgb, E'\n' ORDER BY pixel_id) AS pixels -- Postgres
 --                 SELECT GROUP_CONCAT(rgb SEPARATOR '\n') AS pixels -- MySQL
                 FROM pixel_colors
             )
