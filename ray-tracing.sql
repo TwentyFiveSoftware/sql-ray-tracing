@@ -8,7 +8,7 @@ WITH
     settings AS (
         SELECT 300   AS width,
                200   AS height,
-               50     AS max_depth,
+               50    AS max_depth,
                12.0  AS camera_look_from_x,
                2.0   AS camera_look_from_y,
                -3.0  AS camera_look_from_z,
@@ -289,82 +289,84 @@ WITH
         FROM camera_directions,
              camera_upper_left_corner
     ),
-    pixel_ids (pixel_id) AS (
-        SELECT 0
-        UNION ALL
-        SELECT pixel_id + 1
-        FROM pixel_ids
-        WHERE pixel_id + 1 < (
-            SELECT width * height
-            FROM settings
-        )
+    pixels AS (
+        WITH
+            RECURSIVE
+            pixel_ids (pixel_id) AS (
+                SELECT 0
+                UNION ALL
+                SELECT pixel_id + 1
+                FROM pixel_ids
+                WHERE pixel_id + 1 < (
+                    SELECT width * height
+                    FROM settings
+                )
+            ),
+            pixel_xy AS (
+                SELECT *,
+                       MOD(pixel_id, width)    AS x,
+                       FLOOR(pixel_id / width) AS y
+                FROM pixel_ids,
+                     settings
+            ),
+            pixel_uv AS (
+                SELECT *,
+                       CAST(x AS FLOAT) / (width - 1)  AS u,
+                       CAST(y AS FLOAT) / (height - 1) AS v
+                FROM pixel_xy
+            )
+        SELECT *
+        FROM pixel_uv
     ),
-    pixel_coordinates (pixel_id, x, y, u, v) AS (
-        SELECT pixel_id,
-               x,
-               y,
-               CAST(x AS FLOAT) / (width - 1),
-               CAST(y AS FLOAT) / (height - 1)
-        FROM (
-            SELECT pixel_id,
-                   MOD(pixel_id, width)    AS x,
-                   FLOOR(pixel_id / width) AS y,
-                   width,
-                   height
-            FROM pixel_ids,
-                 (
-                     SELECT width, height
-                     FROM settings
-                 ) AS dimensions
-        ) AS pixel_xy
-    ),
-    rays (pixel_id, ray_id, ray_depth, should_trace, ray_origin_x, ray_origin_y, ray_origin_z, ray_direction_x,
+    -- unique identification of rays by (pixel_id, sample_id, ray_depth)
+    rays (pixel_id, sample_id, ray_depth, should_trace, ray_origin_x, ray_origin_y, ray_origin_z, ray_direction_x,
           ray_direction_y, ray_direction_z, ray_color_r, ray_color_g, ray_color_b) AS (
         -- initial rays (origin at the camera):
         WITH
             camera_rays AS (
                 WITH
-                    non_normalized_camera_ray_directions (pixel_id, ray_direction_x, ray_direction_y, ray_direction_z)
-                        AS (
-                        SELECT pixel_id,
+                    ray_directions_non_normalized AS (
+                        SELECT *,
                                upper_left_corner_x + horizontal_direction_x * u - vertical_direction_x * v -
-                               camera_look_from_x,
+                               camera_look_from_x AS direction_x,
                                upper_left_corner_y + horizontal_direction_y * u - vertical_direction_y * v -
-                               camera_look_from_y,
+                               camera_look_from_y AS direction_y,
                                upper_left_corner_z + horizontal_direction_z * u - vertical_direction_z * v -
-                               camera_look_from_z
-                        FROM pixel_coordinates,
-                             camera,
-                             settings
+                               camera_look_from_z AS direction_z
+                        FROM pixels,
+                             camera
+                    ),
+                    ray_directions_length AS (
+                        SELECT *,
+                               SQRT(direction_x * direction_x + direction_y * direction_y +
+                                    direction_z * direction_z) AS direction_length
+                        FROM ray_directions_non_normalized
+                    ),
+                    ray_directions AS (
+                        SELECT *,
+                               direction_x / direction_length AS ray_direction_x,
+                               direction_y / direction_length AS ray_direction_y,
+                               direction_z / direction_length AS ray_direction_z
+                        FROM ray_directions_length
                     )
                 SELECT pixel_id,
-                       pixel_id * (max_depth + 1)                                AS ray_id,
-                       0                                                         AS ray_depth,
-                       TRUE                                                      AS should_trace,
-                       CAST(camera_look_from_x AS FLOAT)                         AS ray_origin_x,
-                       CAST(camera_look_from_y AS FLOAT)                         AS ray_origin_y,
-                       CAST(camera_look_from_z AS FLOAT)                         AS ray_origin_z,
-                       ray_direction_x / SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
-                                              ray_direction_z * ray_direction_z) AS ray_direction_x,
-                       ray_direction_y / SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
-                                              ray_direction_z * ray_direction_z) AS ray_direction_y,
-                       ray_direction_z / SQRT(ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
-                                              ray_direction_z * ray_direction_z) AS ray_direction_z
-                FROM non_normalized_camera_ray_directions,
-                     settings
-            ),
-            camera_rays_with_background_color AS (
-                SELECT *,
-                       1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5))
-                           + 0.3 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_r,
-                       1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5))
-                           + 0.5 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_g,
-                       1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5))
-                           + 0.8 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_b
-                FROM camera_rays
+                       0                                 AS sample_id,
+                       0                                 AS ray_depth,
+                       TRUE                              AS should_trace,
+                       CAST(camera_look_from_x AS FLOAT) AS ray_origin_x,
+                       CAST(camera_look_from_y AS FLOAT) AS ray_origin_y,
+                       CAST(camera_look_from_z AS FLOAT) AS ray_origin_z,
+                       ray_direction_x,
+                       ray_direction_y,
+                       ray_direction_z
+                FROM ray_directions
             )
-        SELECT *
-        FROM camera_rays_with_background_color
+        -- background color interpolation:
+        SELECT *,
+               1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.3 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_r,
+               1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.5 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_g,
+               1.0 * (1.0 - ((ray_direction_y + 1.0) * 0.5)) + 0.8 * ((ray_direction_y + 1.0) * 0.5) AS ray_color_b
+        FROM camera_rays
 
         UNION ALL
 
@@ -396,7 +398,7 @@ WITH
                     WHERE ray_depth < max_depth
                 ),
                 rays_exceeding_depth_limit AS (
-                    SELECT pixel_id, ray_id, ray_depth
+                    SELECT pixel_id, sample_id, ray_depth
                     FROM last_ray_per_pixel,
                          settings
                     WHERE ray_depth >= max_depth
@@ -441,21 +443,11 @@ WITH
                                  settings
                         ),
                         closest_sphere_intersection AS (
-                            -- Postgres only, but much faster:
-                            SELECT DISTINCT ON (ray_id) *
+                            -- Postgres only:
+                            SELECT DISTINCT ON (pixel_id, sample_id, ray_depth) * -- identifies a single ray
                             FROM sphere_intersection_t
                             WHERE t >= 0.0
-                            ORDER BY ray_id, t
-
---                             SELECT sphere_intersection_t.*
---                             FROM sphere_intersection_t
---                             JOIN (
---                                 SELECT ray_id, MIN(t) AS t
---                                 FROM sphere_intersection_t
---                                 WHERE t >= 0.0
---                                 GROUP BY ray_id
---                             ) lowest_t ON sphere_intersection_t.ray_id = lowest_t.ray_id AND
---                                           sphere_intersection_t.t = lowest_t.t
+                            ORDER BY pixel_id, sample_id, ray_depth, t
                         )
                     SELECT *
                     FROM closest_sphere_intersection
@@ -520,7 +512,7 @@ WITH
                                     ) AS _
                                 )
                             SELECT pixel_id,
-                                   ray_id + 1                    AS ray_id,
+                                   sample_id,
                                    ray_depth + 1                 AS ray_depth,
                                    point_x                       AS ray_origin_x,
                                    point_y                       AS ray_origin_y,
@@ -544,7 +536,7 @@ WITH
                             UNION ALL
                             (
                                 SELECT pixel_id,
-                                       ray_id,
+                                       sample_id,
                                        ray_depth,
                                        ray_origin_x,
                                        ray_origin_y,
@@ -566,10 +558,10 @@ WITH
                         ),
                         normalized_random_unit_vectors AS (
                             -- Postgres only:
-                            SELECT DISTINCT ON (ray_id) *,
-                                                        x / SQRT(x * x + y * y + z * z) AS random_unit_vector_x,
-                                                        y / SQRT(x * x + y * y + z * z) AS random_unit_vector_y,
-                                                        z / SQRT(x * x + y * y + z * z) AS random_unit_vector_z
+                            SELECT DISTINCT ON (pixel_id, sample_id) *, -- identifies a single ray
+                                                                     x / SQRT(x * x + y * y + z * z) AS random_unit_vector_x,
+                                                                     y / SQRT(x * x + y * y + z * z) AS random_unit_vector_y,
+                                                                     z / SQRT(x * x + y * y + z * z) AS random_unit_vector_z
                             FROM random_unit_vectors
                             WHERE x * x + y * y + z * z <= 1
                               AND x + y + z <> 0
@@ -593,7 +585,7 @@ WITH
                             FROM scatter_records_with_non_normalized_scatter_ray_direction
                         )
                     SELECT pixel_id,
-                           ray_id,
+                           sample_id,
                            ray_depth,
                            TRUE AS should_trace,
                            ray_origin_x,
@@ -635,7 +627,7 @@ WITH
                             FROM reflection_vectors
                         )
                     SELECT pixel_id,
-                           ray_id + 1          AS ray_id,
+                           sample_id,
                            ray_depth + 1       AS ray_depth,
                            does_scatter        AS should_trace,
                            point_x             AS ray_origin_x,
@@ -708,7 +700,7 @@ WITH
                             FROM refraction_calc_refraction_vector
                         )
                     SELECT pixel_id,
-                           ray_id + 1          AS ray_id,
+                           sample_id,
                            ray_depth + 1       AS ray_depth,
                            TRUE                AS should_trace,
                            point_x             AS ray_origin_x,
@@ -734,7 +726,7 @@ WITH
                     UNION ALL
                     (
                         SELECT pixel_id,
-                               ray_id + 1,
+                               sample_id,
                                ray_depth + 1,
                                FALSE,
                                0,
@@ -747,7 +739,7 @@ WITH
                                0,
                                0
                         FROM (
-                            SELECT pixel_id, ray_id, ray_depth
+                            SELECT pixel_id, sample_id, ray_depth
                             FROM rays_exceeding_depth_limit
                         ) AS _
                     )
@@ -756,7 +748,7 @@ WITH
             FROM new_rays
         ) AS _
     ),
-    pixels (pixel_id, r, g, b) AS (
+    pixel_colors (pixel_id, r, g, b) AS (
         -- Postgres only:
         SELECT DISTINCT ON (pixel_id) pixel_id,
                                       FLOOR(SQRT(ray_color_r) * 0xFF),
@@ -767,7 +759,7 @@ WITH
     ),
     image_pixel_rgb (rgb) AS (
         SELECT CONCAT(r, ' ', g, ' ', b)
-        FROM pixels
+        FROM pixel_colors
         ORDER BY pixel_id
     ),
     image (image_in_ppm_format) AS (
