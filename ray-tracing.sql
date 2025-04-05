@@ -596,9 +596,66 @@ WITH
                            ray_color_b
                     FROM scatter_records_with_scatter_ray_direction
                 ),
+                scattered_metal_rays AS (
+                    WITH
+                        RECURSIVE
+                        scattered_rays AS (
+                            WITH
+                                metal_hits AS (
+                                    SELECT *
+                                    FROM hit_records
+                                    WHERE sphere_material_type = 'METAL'
+                                )
+                            SELECT pixel_id,
+                                   ray_id + 1                         AS ray_id,
+                                   ray_depth + 1                      AS ray_depth,
+                                   point_x                            AS ray_origin_x,
+                                   point_y                            AS ray_origin_y,
+                                   point_z                            AS ray_origin_z,
+                                   ray_color_r * sphere_albedo_1_r    AS ray_color_r,
+                                   ray_color_g * sphere_albedo_1_g    AS ray_color_g,
+                                   ray_color_b * sphere_albedo_1_b    AS ray_color_b,
+                                   ray_direction_x - 2.0 * normal_x
+                                       * (normal_x * ray_direction_x + normal_y * ray_direction_y +
+                                          normal_z * ray_direction_z) AS ray_direction_x,
+                                   ray_direction_y - 2.0 * normal_y
+                                       * (normal_x * ray_direction_x + normal_y * ray_direction_y +
+                                          normal_z * ray_direction_z) AS ray_direction_y,
+                                   ray_direction_z - 2.0 * normal_z
+                                       * (normal_x * ray_direction_x + normal_y * ray_direction_y +
+                                          normal_z * ray_direction_z) AS ray_direction_z,
+                                   normal_x                           AS hit_normal_x,
+                                   normal_y                           AS hit_normal_y,
+                                   normal_z                           AS hit_normal_z
+                            FROM metal_hits
+                        ),
+                        scattered_rays_with_does_scatter AS (
+                            SELECT *,
+                                   ray_direction_x * hit_normal_x + ray_direction_y * hit_normal_y +
+                                   ray_direction_z * hit_normal_z > 0 AS does_scatter
+                            FROM scattered_rays
+                        )
+                    SELECT pixel_id,
+                           ray_id,
+                           ray_depth,
+                           does_scatter AS should_trace,
+                           ray_origin_x,
+                           ray_origin_y,
+                           ray_origin_z,
+                           ray_direction_x,
+                           ray_direction_y,
+                           ray_direction_z,
+                           CASE WHEN does_scatter THEN ray_color_r ELSE 0 END,
+                           CASE WHEN does_scatter THEN ray_color_g ELSE 0 END,
+                           CASE WHEN does_scatter THEN ray_color_b ELSE 0 END
+                    FROM scattered_rays_with_does_scatter
+                ),
                 new_rays AS (
                     SELECT *
                     FROM scattered_diffuse_rays
+                    UNION ALL
+                    SELECT *
+                    FROM scattered_metal_rays
                     UNION ALL
                     (
                         SELECT pixel_id,
@@ -620,7 +677,7 @@ WITH
                             UNION ALL
                             SELECT pixel_id, ray_id, ray_depth
                             FROM hit_records
-                            WHERE sphere_material_type <> 'DIFFUSE'
+                            WHERE sphere_material_type = 'DIELECTRIC'
                         ) AS _
                     )
                 )
