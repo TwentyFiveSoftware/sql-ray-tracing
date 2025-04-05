@@ -25,7 +25,8 @@ WITH
             RECURSIVE
             static_spheres (sphere_id, sphere_center_x, sphere_center_y, sphere_center_z, sphere_radius,
                             sphere_material_type, sphere_texture_type, sphere_albedo_1_r, sphere_albedo_1_g,
-                            sphere_albedo_1_b, sphere_albedo_2_r, sphere_albedo_2_g, sphere_albedo_2_b) AS (
+                            sphere_albedo_1_b, sphere_albedo_2_r, sphere_albedo_2_g, sphere_albedo_2_b,
+                            sphere_refraction_index) AS (
                 -- ground sphere:
                 SELECT -1,
                        0,
@@ -39,7 +40,8 @@ WITH
                        0.05,
                        0.95,
                        0.95,
-                       0.95
+                       0.95,
+                       0
                 UNION ALL
                 -- left sphere:
                 SELECT -2,
@@ -52,6 +54,7 @@ WITH
                        0.6,
                        0.3,
                        0.1,
+                       0,
                        0,
                        0,
                        0
@@ -69,7 +72,8 @@ WITH
                        0,
                        0,
                        0,
-                       0
+                       0,
+                       1.5
                 UNION ALL
                 -- right sphere:
                 SELECT -4,
@@ -84,10 +88,12 @@ WITH
                        0.5,
                        0,
                        0,
+                       0,
                        0
             ),
             random_spheres (sphere_id, sphere_center_x, sphere_center_y, sphere_center_z, sphere_radius,
-                            sphere_material_type, sphere_albedo_r, sphere_albedo_g, sphere_albedo_b) AS (
+                            sphere_material_type, sphere_albedo_r, sphere_albedo_g, sphere_albedo_b,
+                            sphere_refraction_index) AS (
                 -- dummy sphere, so that there is an initial sphere_id for the recursion
                 SELECT 0,
                        CAST(0 AS FLOAT),
@@ -95,6 +101,7 @@ WITH
                        CAST(0 AS FLOAT),
                        CAST(0 AS FLOAT),
                        'DIFFUSE',
+                       CAST(0 AS FLOAT),
                        CAST(0 AS FLOAT),
                        CAST(0 AS FLOAT),
                        CAST(0 AS FLOAT)
@@ -184,7 +191,8 @@ WITH
                            sphere_material_type,
                            sphere_albedo_r,
                            sphere_albedo_g,
-                           sphere_albedo_b
+                           sphere_albedo_b,
+                           1.5 AS sphere_refraction_index
                     FROM sphere_color
                 ) AS _
             )
@@ -203,7 +211,8 @@ WITH
                sphere_albedo_b,
                0,
                0,
-               0
+               0,
+               sphere_refraction_index
         FROM random_spheres
     ),
     camera AS (
@@ -552,6 +561,7 @@ WITH
                                 FROM random_unit_vectors
                                 WHERE x * x + y * y + z * z > 1
                                    OR x + y + z = 0
+                                   OR (ABS(x) < 1e-8 AND ABS(z) < 1e-8 AND ABS(z) < 1e-8)
                             )
                         ),
                         normalized_random_unit_vectors AS (
@@ -563,6 +573,7 @@ WITH
                             FROM random_unit_vectors
                             WHERE x * x + y * y + z * z <= 1
                               AND x + y + z <> 0
+                              AND NOT (ABS(x) < 1e-8 AND ABS(z) < 1e-8 AND ABS(z) < 1e-8)
                         ),
                         scatter_records_with_non_normalized_scatter_ray_direction AS (
                             SELECT *,
@@ -598,57 +609,118 @@ WITH
                 ),
                 scattered_metal_rays AS (
                     WITH
-                        RECURSIVE
-                        scattered_rays AS (
-                            WITH
-                                metal_hits AS (
-                                    SELECT *
-                                    FROM hit_records
-                                    WHERE sphere_material_type = 'METAL'
-                                )
-                            SELECT pixel_id,
-                                   ray_id + 1                         AS ray_id,
-                                   ray_depth + 1                      AS ray_depth,
-                                   point_x                            AS ray_origin_x,
-                                   point_y                            AS ray_origin_y,
-                                   point_z                            AS ray_origin_z,
-                                   ray_color_r * sphere_albedo_1_r    AS ray_color_r,
-                                   ray_color_g * sphere_albedo_1_g    AS ray_color_g,
-                                   ray_color_b * sphere_albedo_1_b    AS ray_color_b,
-                                   ray_direction_x - 2.0 * normal_x
-                                       * (normal_x * ray_direction_x + normal_y * ray_direction_y +
-                                          normal_z * ray_direction_z) AS ray_direction_x,
-                                   ray_direction_y - 2.0 * normal_y
-                                       * (normal_x * ray_direction_x + normal_y * ray_direction_y +
-                                          normal_z * ray_direction_z) AS ray_direction_y,
-                                   ray_direction_z - 2.0 * normal_z
-                                       * (normal_x * ray_direction_x + normal_y * ray_direction_y +
-                                          normal_z * ray_direction_z) AS ray_direction_z,
-                                   normal_x                           AS hit_normal_x,
-                                   normal_y                           AS hit_normal_y,
-                                   normal_z                           AS hit_normal_z
-                            FROM metal_hits
+                        metal_hits AS (
+                            SELECT *
+                            FROM hit_records
+                            WHERE sphere_material_type = 'METAL'
                         ),
-                        scattered_rays_with_does_scatter AS (
+                        reflection_vectors AS (
+                            WITH
+                                reflection_calc_dot AS (
+                                    SELECT *,
+                                           (normal_x * ray_direction_x + normal_y * ray_direction_y +
+                                            normal_z * ray_direction_z) AS dot_n_i
+                                    FROM metal_hits
+                                )
                             SELECT *,
-                                   ray_direction_x * hit_normal_x + ray_direction_y * hit_normal_y +
-                                   ray_direction_z * hit_normal_z > 0 AS does_scatter
-                            FROM scattered_rays
+                                   ray_direction_x - 2.0 * normal_x * dot_n_i AS reflection_vector_x,
+                                   ray_direction_y - 2.0 * normal_y * dot_n_i AS reflection_vector_y,
+                                   ray_direction_z - 2.0 * normal_z * dot_n_i AS reflection_vector_z
+                            FROM reflection_calc_dot
+                        ),
+                        with_does_scatter AS (
+                            SELECT *,
+                                   reflection_vector_x * normal_x + reflection_vector_y * normal_y +
+                                   reflection_vector_z * normal_z > 0 AS does_scatter
+                            FROM reflection_vectors
                         )
                     SELECT pixel_id,
-                           ray_id,
-                           ray_depth,
-                           does_scatter AS should_trace,
-                           ray_origin_x,
-                           ray_origin_y,
-                           ray_origin_z,
-                           ray_direction_x,
-                           ray_direction_y,
-                           ray_direction_z,
-                           CASE WHEN does_scatter THEN ray_color_r ELSE 0 END,
-                           CASE WHEN does_scatter THEN ray_color_g ELSE 0 END,
-                           CASE WHEN does_scatter THEN ray_color_b ELSE 0 END
-                    FROM scattered_rays_with_does_scatter
+                           ray_id + 1          AS ray_id,
+                           ray_depth + 1       AS ray_depth,
+                           does_scatter        AS should_trace,
+                           point_x             AS ray_origin_x,
+                           point_y             AS ray_origin_y,
+                           point_z             AS ray_origin_z,
+                           reflection_vector_x AS ray_direction_x,
+                           reflection_vector_y AS ray_direction_y,
+                           reflection_vector_z AS ray_direction_z,
+                           CASE
+                               WHEN does_scatter THEN ray_color_r * sphere_albedo_1_r
+                               ELSE 0 END      AS ray_color_r,
+                           CASE
+                               WHEN does_scatter THEN ray_color_g * sphere_albedo_1_g
+                               ELSE 0 END      AS ray_color_g,
+                           CASE
+                               WHEN does_scatter THEN ray_color_b * sphere_albedo_1_b
+                               ELSE 0 END      AS ray_color_b
+                    FROM with_does_scatter
+                ),
+                scattered_dielectric_rays AS (
+                    WITH
+                        dielectric_hits AS (
+                            SELECT *
+                            FROM hit_records
+                            WHERE sphere_material_type = 'DIELECTRIC'
+                        ),
+                        refraction_vectors AS (
+                            WITH
+                                refraction_ratios AS (
+                                    SELECT *,
+                                           CASE
+                                               WHEN is_front_face THEN 1.0 / sphere_refraction_index
+                                               ELSE sphere_refraction_index END AS refraction_ratio
+                                    FROM dielectric_hits
+                                ),
+                                refraction_calc_dot AS (
+                                    SELECT *,
+                                           (normal_x * ray_direction_x + normal_y * ray_direction_y +
+                                            normal_z * ray_direction_z) AS dot_n_i
+                                    FROM refraction_ratios
+                                ),
+                                refraction_calc_k AS (
+                                    SELECT *,
+                                           1.0 - refraction_ratio * refraction_ratio * (1.0 - dot_n_i * dot_n_i) AS refraction_k
+                                    FROM refraction_calc_dot
+                                ),
+                                refraction_calc_refraction_vector AS (
+                                    SELECT *,
+                                           refraction_ratio * ray_direction_x -
+                                           (refraction_ratio * dot_n_i + SQRT(refraction_k)) *
+                                           normal_x AS refraction_vector_x,
+                                           refraction_ratio * ray_direction_y -
+                                           (refraction_ratio * dot_n_i + SQRT(refraction_k)) *
+                                           normal_y AS refraction_vector_y,
+                                           refraction_ratio * ray_direction_z -
+                                           (refraction_ratio * dot_n_i + SQRT(refraction_k)) *
+                                           normal_z AS refraction_vector_z
+                                    FROM refraction_calc_k
+                                )
+                            SELECT *,
+                                   CASE
+                                       WHEN refraction_k < 0.0 THEN 0
+                                       ELSE refraction_vector_x END AS ray_direction_x,
+                                   CASE
+                                       WHEN refraction_k < 0.0 THEN 0
+                                       ELSE refraction_vector_y END AS ray_direction_y,
+                                   CASE
+                                       WHEN refraction_k < 0.0 THEN 0
+                                       ELSE refraction_vector_z END AS ray_direction_z
+                            FROM refraction_calc_refraction_vector
+                        )
+                    SELECT pixel_id,
+                           ray_id + 1          AS ray_id,
+                           ray_depth + 1       AS ray_depth,
+                           TRUE                AS should_trace,
+                           point_x             AS ray_origin_x,
+                           point_y             AS ray_origin_y,
+                           point_z             AS ray_origin_z,
+                           refraction_vector_x AS ray_direction_x,
+                           refraction_vector_y AS ray_direction_y,
+                           refraction_vector_z AS ray_direction_z,
+                           ray_color_r,
+                           ray_color_g,
+                           ray_color_b
+                    FROM refraction_vectors
                 ),
                 new_rays AS (
                     SELECT *
@@ -656,6 +728,9 @@ WITH
                     UNION ALL
                     SELECT *
                     FROM scattered_metal_rays
+                    UNION ALL
+                    SELECT *
+                    FROM scattered_dielectric_rays
                     UNION ALL
                     (
                         SELECT pixel_id,
@@ -674,10 +749,6 @@ WITH
                         FROM (
                             SELECT pixel_id, ray_id, ray_depth
                             FROM rays_exceeding_depth_limit
-                            UNION ALL
-                            SELECT pixel_id, ray_id, ray_depth
-                            FROM hit_records
-                            WHERE sphere_material_type = 'DIELECTRIC'
                         ) AS _
                     )
                 )
