@@ -19,16 +19,21 @@ WITH
                0.001 AS sphere_collision_t_min
     ),
     spheres (sphere_id, sphere_center_x, sphere_center_y, sphere_center_z, sphere_radius, sphere_material_type,
-             sphere_albedo_r, sphere_albedo_g, sphere_albedo_b) AS (
+             sphere_texture_type, sphere_albedo_1_r, sphere_albedo_1_g, sphere_albedo_1_b, sphere_albedo_2_r,
+             sphere_albedo_2_g, sphere_albedo_2_b) AS (
         SELECT 0,
                0,
                0,
                1,
                0.5,
                'DIFFUSE',
-               0.9,
-               0.9,
-               0.9
+               'SOLID',
+               1,
+               0,
+               0,
+               0,
+               0,
+               0
         UNION ALL
         SELECT 1,
                0,
@@ -36,9 +41,13 @@ WITH
                0,
                1000,
                'DIFFUSE',
-               0.3,
-               0.3,
-               0.3
+               'CHECKERED',
+               0.05,
+               0.05,
+               0.05,
+               0.95,
+               0.95,
+               0.95
     ),
     camera AS (
         WITH
@@ -322,20 +331,41 @@ WITH
                     WITH
                         RECURSIVE
                         incomplete_scattered_rays AS (
+                            WITH
+                                diffuse_hits AS (
+                                    SELECT *
+                                    FROM hit_records
+                                    WHERE sphere_material_type = 'DIFFUSE'
+                                ),
+                                scatter_rays_with_color AS (
+                                    SELECT *,
+                                           CASE WHEN is_color_1 THEN sphere_albedo_1_r ELSE sphere_albedo_2_r END AS texture_color_r,
+                                           CASE WHEN is_color_1 THEN sphere_albedo_1_g ELSE sphere_albedo_2_g END AS texture_color_g,
+                                           CASE WHEN is_color_1 THEN sphere_albedo_1_b ELSE sphere_albedo_2_b END AS texture_color_b
+                                    FROM (
+                                        SELECT *,
+                                               CASE
+                                                   WHEN sphere_texture_type = 'SOLID' THEN TRUE
+                                                   WHEN sphere_texture_type = 'CHECKERED' THEN
+                                                       SIN(6 * point_x) * SIN(6 * point_y) * SIN(6 * point_z) > 0
+                                                   END
+                                                   AS is_color_1
+                                        FROM diffuse_hits
+                                    ) AS _
+                                )
                             SELECT pixel_id,
                                    ray_id + 1                    AS ray_id,
                                    ray_depth + 1                 AS ray_depth,
                                    point_x                       AS ray_origin_x,
                                    point_y                       AS ray_origin_y,
                                    point_z                       AS ray_origin_z,
-                                   ray_color_r * sphere_albedo_r AS ray_color_r,
-                                   ray_color_g * sphere_albedo_g AS ray_color_g,
-                                   ray_color_b * sphere_albedo_b AS ray_color_b,
+                                   ray_color_r * texture_color_r AS ray_color_r,
+                                   ray_color_g * texture_color_g AS ray_color_g,
+                                   ray_color_b * texture_color_b AS ray_color_b,
                                    normal_x                      AS hit_normal_x,
                                    normal_y                      AS hit_normal_y,
                                    normal_z                      AS hit_normal_z
-                            FROM hit_records
-                            WHERE sphere_material_type = 'DIFFUSE'
+                            FROM scatter_rays_with_color
                         ),
                         random_unit_vectors AS (
                             (
