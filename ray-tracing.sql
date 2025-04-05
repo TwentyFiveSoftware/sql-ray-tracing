@@ -6,12 +6,12 @@
 WITH
     RECURSIVE
     settings AS (
-        SELECT 800   AS width,
-               600   AS height,
-               10    AS max_depth,
-               0.0   AS camera_look_from_x,
-               0.0   AS camera_look_from_y,
-               -4.0  AS camera_look_from_z,
+        SELECT 300   AS width,
+               200   AS height,
+               3     AS max_depth,
+               12.0  AS camera_look_from_x,
+               2.0   AS camera_look_from_y,
+               -3.0  AS camera_look_from_z,
                0.0   AS camera_look_at_x,
                0.0   AS camera_look_at_y,
                0.0   AS camera_look_at_z,
@@ -21,33 +21,190 @@ WITH
     spheres (sphere_id, sphere_center_x, sphere_center_y, sphere_center_z, sphere_radius, sphere_material_type,
              sphere_texture_type, sphere_albedo_1_r, sphere_albedo_1_g, sphere_albedo_1_b, sphere_albedo_2_r,
              sphere_albedo_2_g, sphere_albedo_2_b) AS (
-        SELECT 0,
-               0,
-               0,
-               1,
-               0.5,
-               'DIFFUSE',
+        WITH
+            RECURSIVE
+            static_spheres (sphere_id, sphere_center_x, sphere_center_y, sphere_center_z, sphere_radius,
+                            sphere_material_type, sphere_texture_type, sphere_albedo_1_r, sphere_albedo_1_g,
+                            sphere_albedo_1_b, sphere_albedo_2_r, sphere_albedo_2_g, sphere_albedo_2_b) AS (
+                -- ground sphere:
+                SELECT -1,
+                       0,
+                       -1000,
+                       0,
+                       1000,
+                       'DIFFUSE',
+                       'CHECKERED',
+                       0.05,
+                       0.05,
+                       0.05,
+                       0.95,
+                       0.95,
+                       0.95
+                UNION ALL
+                -- left sphere:
+                SELECT -2,
+                       -4,
+                       1,
+                       0,
+                       1,
+                       'DIFFUSE',
+                       'SOLID',
+                       0.6,
+                       0.3,
+                       0.1,
+                       0,
+                       0,
+                       0
+                UNION ALL
+                -- center sphere:
+                SELECT -3,
+                       0,
+                       1,
+                       0,
+                       1,
+                       'DIELECTRIC',
+                       'SOLID',
+                       0,
+                       0,
+                       0,
+                       0,
+                       0,
+                       0
+                UNION ALL
+                -- right sphere:
+                SELECT -4,
+                       4,
+                       1,
+                       0,
+                       1,
+                       'METAL',
+                       'SOLID',
+                       0.7,
+                       0.6,
+                       0.5,
+                       0,
+                       0,
+                       0
+            ),
+            random_spheres (sphere_id, sphere_center_x, sphere_center_y, sphere_center_z, sphere_radius,
+                            sphere_material_type, sphere_albedo_r, sphere_albedo_g, sphere_albedo_b) AS (
+                -- dummy sphere, so that there is an initial sphere_id for the recursion
+                SELECT 0,
+                       CAST(0 AS FLOAT),
+                       CAST(0 AS FLOAT),
+                       CAST(0 AS FLOAT),
+                       CAST(0 AS FLOAT),
+                       'DIFFUSE',
+                       CAST(0 AS FLOAT),
+                       CAST(0 AS FLOAT),
+                       CAST(0 AS FLOAT)
+                UNION ALL
+                -- 22*22 random spheres:
+                SELECT *
+                FROM (
+                    WITH
+                        new_sphere AS (
+                            SELECT sphere_id + 1 AS sphere_id
+                            FROM random_spheres
+                            WHERE sphere_id < 22 * 22
+                        ),
+                        sphere_location AS (
+                            SELECT *,
+                                   MOD(sphere_id, 22) - 11 + RANDOM() * 0.9    AS sphere_center_x,
+                                   0.2                                         AS sphere_center_y,
+                                   FLOOR(sphere_id / 22) - 11 + RANDOM() * 0.9 AS sphere_center_z,
+                                   0.2                                         AS sphere_radius,
+                                   RANDOM()                                    AS material_random
+                            FROM new_sphere
+                        ),
+                        sphere_material AS (
+                            SELECT *,
+                                   CASE
+                                       WHEN material_random < 0.8 THEN 'DIFFUSE'
+                                       WHEN material_random >= 0.8 AND material_random < 0.95 THEN 'METAL'
+                                       WHEN material_random >= 0.95 THEN 'DIELECTRIC'
+                                       END AS sphere_material_type
+                            FROM sphere_location
+                        ),
+                        sphere_color AS (
+                            -- HSV to RGB conversion:
+                            WITH
+                                sphere_color_h AS (
+                                    SELECT *,
+                                           (RANDOM() * 360) / 60 AS color_h
+                                    FROM sphere_material
+                                ),
+                                sphere_color_fraction AS (
+                                    SELECT *,
+                                           color_h - FLOOR(color_h) AS color_fraction
+                                    FROM sphere_color_h
+                                ),
+                                sphere_color_calc AS (
+                                    SELECT *,
+                                           0.45 * (1 - 0.75)                        AS color_p,
+                                           0.45 * (1 - 0.75 * color_fraction)       AS color_q,
+                                           0.45 * (1 - 0.75 * (1 - color_fraction)) AS color_t
+                                    fROM sphere_color_fraction
+                                )
+                            SELECT *,
+                                   CASE
+                                       WHEN 0 <= color_h AND color_h < 1 THEN 0.45
+                                       WHEN 1 <= color_h AND color_h < 2 THEN color_q
+                                       WHEN 2 <= color_h AND color_h < 3 THEN color_p
+                                       WHEN 3 <= color_h AND color_h < 4 THEN color_p
+                                       WHEN 4 <= color_h AND color_h < 5 THEN color_t
+                                       WHEN 5 <= color_h AND color_h < 6 THEN 0.45
+                                       ElSE 0
+                                       END AS sphere_albedo_r,
+                                   CASE
+                                       WHEN 0 <= color_h AND color_h < 1 THEN color_t
+                                       WHEN 1 <= color_h AND color_h < 2 THEN 0.45
+                                       WHEN 2 <= color_h AND color_h < 3 THEN 0.45
+                                       WHEN 3 <= color_h AND color_h < 4 THEN color_q
+                                       WHEN 4 <= color_h AND color_h < 5 THEN color_p
+                                       WHEN 5 <= color_h AND color_h < 6 THEN color_p
+                                       ELSE 0
+                                       END AS sphere_albedo_g,
+                                   CASE
+                                       WHEN 0 <= color_h AND color_h < 1 THEN color_p
+                                       WHEN 1 <= color_h AND color_h < 2 THEN color_p
+                                       WHEN 2 <= color_h AND color_h < 3 THEN color_t
+                                       WHEN 3 <= color_h AND color_h < 4 THEN 0.45
+                                       WHEN 4 <= color_h AND color_h < 5 THEN 0.45
+                                       WHEN 5 <= color_h AND color_h < 6 THEN color_q
+                                       ELSE 0
+                                       END AS sphere_albedo_b
+                            FROM sphere_color_calc
+                        )
+                    SELECT sphere_id,
+                           sphere_center_x,
+                           sphere_center_y,
+                           sphere_center_z,
+                           sphere_radius,
+                           sphere_material_type,
+                           sphere_albedo_r,
+                           sphere_albedo_g,
+                           sphere_albedo_b
+                    FROM sphere_color
+                ) AS _
+            )
+        SELECT *
+        FROM static_spheres
+        UNION ALL
+        SELECT sphere_id,
+               sphere_center_x,
+               sphere_center_y,
+               sphere_center_z,
+               sphere_radius,
+               sphere_material_type,
                'SOLID',
-               1,
-               0,
-               0,
+               sphere_albedo_r,
+               sphere_albedo_g,
+               sphere_albedo_b,
                0,
                0,
                0
-        UNION ALL
-        SELECT 1,
-               0,
-               -1000.5,
-               0,
-               1000,
-               'DIFFUSE',
-               'CHECKERED',
-               0.05,
-               0.05,
-               0.05,
-               0.95,
-               0.95,
-               0.95
+        FROM random_spheres
     ),
     camera AS (
         WITH
