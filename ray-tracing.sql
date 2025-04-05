@@ -317,50 +317,97 @@ WITH
                         )
                     SELECT *
                     FROM intersections
---                     SELECT pixel_id,
---                            ray_id,
---                            ray_depth,
---                            ray_color_r * sphere_albedo_r AS new_color_r,
---                            ray_color_g * sphere_albedo_g AS new_color_g,
---                            ray_color_b * sphere_albedo_b AS new_color_b
---                     FROM intersections
                 ),
                 scattered_diffuse_rays AS (
                     WITH
                         RECURSIVE
-                        random_unit_vectors(x, y, z) AS (
-                            SELECT RANDOM() * 2.0 - 1.0 AS x, RANDOM() * 2.0 - 1.0 AS y, RANDOM() * 2.0 - 1.0 AS z
-                            UNION ALL
-                            SELECT RANDOM() * 2.0 - 1.0 AS x, RANDOM() * 2.0 - 1.0 AS y, RANDOM() * 2.0 - 1.0 AS z
-                            FROM random_unit_vectors
-                            WHERE x * x + y * y + z * z > 1
-                               OR x + y + z = 0
+                        incomplete_scattered_rays AS (
+                            SELECT pixel_id,
+                                   ray_id + 1                    AS ray_id,
+                                   ray_depth + 1                 AS ray_depth,
+                                   point_x                       AS ray_origin_x,
+                                   point_y                       AS ray_origin_y,
+                                   point_z                       AS ray_origin_z,
+                                   ray_color_r * sphere_albedo_r AS ray_color_r,
+                                   ray_color_g * sphere_albedo_g AS ray_color_g,
+                                   ray_color_b * sphere_albedo_b AS ray_color_b,
+                                   normal_x                      AS hit_normal_x,
+                                   normal_y                      AS hit_normal_y,
+                                   normal_z                      AS hit_normal_z
+                            FROM hit_records
+                            WHERE sphere_material_type = 'DIFFUSE'
                         ),
-                        random_unit_vector (x, y, z) AS (
-                            SELECT x / SQRT(x * x + y * y + z * z),
-                                   y / SQRT(x * x + y * y + z * z),
-                                   z / SQRT(x * x + y * y + z * z)
+                        random_unit_vectors AS (
+                            (
+                                SELECT *,
+                                       RANDOM() * 2.0 - 1.0 AS x,
+                                       RANDOM() * 2.0 - 1.0 AS y,
+                                       RANDOM() * 2.0 - 1.0 AS z
+                                FROM incomplete_scattered_rays
+                            )
+                            UNION ALL
+                            (
+                                SELECT pixel_id,
+                                       ray_id,
+                                       ray_depth,
+                                       ray_origin_x,
+                                       ray_origin_y,
+                                       ray_origin_z,
+                                       ray_color_r,
+                                       ray_color_g,
+                                       ray_color_b,
+                                       hit_normal_x,
+                                       hit_normal_y,
+                                       hit_normal_z,
+                                       RANDOM() * 2.0 - 1.0 AS x,
+                                       RANDOM() * 2.0 - 1.0 AS y,
+                                       RANDOM() * 2.0 - 1.0 AS z
+                                FROM random_unit_vectors
+                                WHERE x * x + y * y + z * z > 1
+                                   OR x + y + z = 0
+                            )
+                        ),
+                        normalized_random_unit_vectors AS (
+                            -- Postgres only:
+                            SELECT DISTINCT ON (ray_id) *,
+                                                        x / SQRT(x * x + y * y + z * z) AS random_unit_vector_x,
+                                                        y / SQRT(x * x + y * y + z * z) AS random_unit_vector_y,
+                                                        z / SQRT(x * x + y * y + z * z) AS random_unit_vector_z
                             FROM random_unit_vectors
                             WHERE x * x + y * y + z * z <= 1
                               AND x + y + z <> 0
-                            LIMIT 1
+                        ),
+                        scatter_records_with_non_normalized_scatter_ray_direction AS (
+                            SELECT *,
+                                   hit_normal_x + random_unit_vector_x AS direction_x,
+                                   hit_normal_y + random_unit_vector_y AS direction_y,
+                                   hit_normal_z + random_unit_vector_z AS direction_z
+                            FROM normalized_random_unit_vectors
+                        ),
+                        scatter_records_with_scatter_ray_direction AS (
+                            SELECT *,
+                                   direction_x / SQRT(direction_x * direction_x + direction_y * direction_y +
+                                                      direction_z * direction_z) AS ray_direction_x,
+                                   direction_y / SQRT(direction_x * direction_x + direction_y * direction_y +
+                                                      direction_z * direction_z) AS ray_direction_y,
+                                   direction_z / SQRT(direction_x * direction_x + direction_y * direction_y +
+                                                      direction_z * direction_z) AS ray_direction_z
+                            FROM scatter_records_with_non_normalized_scatter_ray_direction
                         )
                     SELECT pixel_id,
-                           ray_id + 1                    AS ray_id,
-                           ray_depth + 1                 AS ray_depth,
-                           TRUE                          AS should_trace,
-                           point_x                       AS ray_origin_x,
-                           point_y                       AS ray_origin_y,
-                           point_z                       AS ray_origin_z,
-                           random_unit_vector.x          AS ray_direction_x,
-                           random_unit_vector.y          AS ray_direction_y,
-                           random_unit_vector.z          AS ray_direction_z,
-                           ray_color_r * sphere_albedo_r AS ray_color_r,
-                           ray_color_g * sphere_albedo_g AS ray_color_g,
-                           ray_color_b * sphere_albedo_b AS ray_color_b
-                    FROM hit_records,
-                         random_unit_vector
-                    WHERE sphere_material_type = 'DIFFUSE'
+                           ray_id,
+                           ray_depth,
+                           TRUE AS should_trace,
+                           ray_origin_x,
+                           ray_origin_y,
+                           ray_origin_z,
+                           ray_direction_x,
+                           ray_direction_y,
+                           ray_direction_z,
+                           ray_color_r,
+                           ray_color_g,
+                           ray_color_b
+                    FROM scatter_records_with_scatter_ray_direction
                 ),
                 new_rays AS (
                     SELECT *
