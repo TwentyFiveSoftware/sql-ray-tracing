@@ -8,7 +8,7 @@ WITH
     settings AS (
         SELECT 300   AS width,
                200   AS height,
-               3     AS max_depth,
+               50     AS max_depth,
                12.0  AS camera_look_from_x,
                2.0   AS camera_look_from_y,
                -3.0  AS camera_look_from_z,
@@ -757,25 +757,13 @@ WITH
         ) AS _
     ),
     pixels (pixel_id, r, g, b) AS (
-        -- Postgres only, but much faster:
+        -- Postgres only:
         SELECT DISTINCT ON (pixel_id) pixel_id,
-                                      FLOOR(ray_color_r * 0xFF),
-                                      FLOOR(ray_color_g * 0xFF),
-                                      FLOOR(ray_color_b * 0xFF)
+                                      FLOOR(SQRT(ray_color_r) * 0xFF),
+                                      FLOOR(SQRT(ray_color_g) * 0xFF),
+                                      FLOOR(SQRT(ray_color_b) * 0xFF)
         FROM rays
         ORDER BY pixel_id, ray_depth DESC
-
---         SELECT rays.pixel_id,
---                FLOOR(ray_color_r * 0xFF),
---                FLOOR(ray_color_g * 0xFF),
---                FLOOR(ray_color_b * 0xFF)
---         FROM (
---             SELECT pixel_id,
---                    MAX(ray_depth) AS depth
---             FROM rays
---             GROUP BY pixel_id
---         ) AS last_ray
---         JOIN rays ON last_ray.pixel_id = rays.pixel_id AND last_ray.depth = rays.ray_depth
     ),
     image_pixel_rgb (rgb) AS (
         SELECT CONCAT(r, ' ', g, ' ', b)
