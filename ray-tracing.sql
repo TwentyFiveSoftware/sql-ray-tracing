@@ -14,30 +14,25 @@ WITH
                25.0  AS camera_fov,
                0.001 AS sphere_collision_t_min
     ),
-    spheres (sphere_id, sphere_center_x, sphere_center_y, sphere_center_z, sphere_radius, sphere_material_type,
-             sphere_texture_type, sphere_albedo_1_r, sphere_albedo_1_g, sphere_albedo_1_b, sphere_albedo_2_r,
-             sphere_albedo_2_g, sphere_albedo_2_b) AS (
+    spheres AS (
         WITH
             RECURSIVE
-            static_spheres (sphere_id, sphere_center_x, sphere_center_y, sphere_center_z, sphere_radius,
-                            sphere_material_type, sphere_texture_type, sphere_albedo_1_r, sphere_albedo_1_g,
-                            sphere_albedo_1_b, sphere_albedo_2_r, sphere_albedo_2_g, sphere_albedo_2_b,
-                            sphere_refraction_index) AS (
+            static_spheres AS (
                 -- ground sphere:
-                SELECT -1,
-                       0,
-                       -1000,
-                       0,
-                       1000,
-                       'DIFFUSE',
-                       'CHECKERED',
-                       0.05,
-                       0.05,
-                       0.05,
-                       0.95,
-                       0.95,
-                       0.95,
-                       0
+                SELECT -1          AS sphere_id,
+                       0           AS sphere_center_x,
+                       -1000       AS sphere_center_y,
+                       0           AS sphere_center_z,
+                       1000        AS sphere_radius,
+                       'DIFFUSE'   AS sphere_material_type,
+                       'CHECKERED' AS sphere_texture_type,
+                       0.05        AS sphere_albedo_1_r,
+                       0.05        AS sphere_albedo_1_g,
+                       0.05        AS sphere_albedo_1_b,
+                       0.95        AS sphere_albedo_2_r,
+                       0.95        AS sphere_albedo_2_g,
+                       0.95        AS sphere_albedo_2_b,
+                       0           AS sphere_refraction_index
                 UNION ALL
                 -- left sphere:
                 SELECT -2,
@@ -87,20 +82,18 @@ WITH
                        0,
                        0
             ),
-            random_spheres (sphere_id, sphere_center_x, sphere_center_y, sphere_center_z, sphere_radius,
-                            sphere_material_type, sphere_albedo_r, sphere_albedo_g, sphere_albedo_b,
-                            sphere_refraction_index) AS (
+            random_spheres AS (
                 -- dummy sphere, so that there is an initial sphere_id for the recursion
-                SELECT 0,
-                       CAST(0 AS FLOAT),
-                       CAST(0 AS FLOAT),
-                       CAST(0 AS FLOAT),
-                       CAST(0 AS FLOAT),
-                       'DIFFUSE',
-                       CAST(0 AS FLOAT),
-                       CAST(0 AS FLOAT),
-                       CAST(0 AS FLOAT),
-                       CAST(0 AS FLOAT)
+                SELECT 0                AS sphere_id,
+                       CAST(0 AS FLOAT) AS sphere_center_x,
+                       CAST(0 AS FLOAT) AS sphere_center_y,
+                       CAST(0 AS FLOAT) AS sphere_center_z,
+                       CAST(0 AS FLOAT) AS sphere_radius,
+                       'DIFFUSE'        AS sphere_material_type,
+                       CAST(0 AS FLOAT) AS sphere_albedo_r,
+                       CAST(0 AS FLOAT) AS sphere_albedo_g,
+                       CAST(0 AS FLOAT) AS sphere_albedo_b,
+                       CAST(0 AS FLOAT) AS sphere_refraction_index
                 UNION ALL
                 -- 22*22 random spheres:
                 SELECT *
@@ -213,70 +206,89 @@ WITH
     ),
     camera AS (
         WITH
-            camera_viewport_height (viewport_height) AS (
-                SELECT TAN(RADIANS(camera_fov) / 2.0) * 2.0
+            camera_viewport_height AS (
+                SELECT TAN(RADIANS(camera_fov) / 2.0) * 2.0 AS viewport_height
                 FROM settings
             ),
-            camera_viewport_width (viewport_width) AS (
+            camera_viewport_width AS (
                 SELECT CAST(width AS FLOAT) / height * viewport_height AS viewport_width
                 FROM settings,
                      camera_viewport_height
             ),
-            camera_forward (forward_x, forward_y, forward_z) AS (
+            camera_forward AS (
                 WITH
-                    forward_non_normalized (forward_x, forward_y, forward_z) AS (
-                        SELECT camera_look_at_x - camera_look_from_x,
-                               camera_look_at_y - camera_look_from_y,
-                               camera_look_at_z - camera_look_from_z
+                    forward_non_normalized AS (
+                        SELECT camera_look_at_x - camera_look_from_x AS forward_x,
+                               camera_look_at_y - camera_look_from_y AS forward_y,
+                               camera_look_at_z - camera_look_from_z AS forward_z
                         FROM settings
+                    ),
+                    forward_length_calc AS (
+                        SELECT *,
+                               SQRT(forward_x * forward_x + forward_y * forward_y + forward_z * forward_z) AS forward_length
+                        fROM forward_non_normalized
                     )
-                SELECT forward_x / SQRT(forward_x * forward_x + forward_y * forward_y + forward_z * forward_z),
-                       forward_y / SQRT(forward_x * forward_x + forward_y * forward_y + forward_z * forward_z),
-                       forward_z / SQRT(forward_x * forward_x + forward_y * forward_y + forward_z * forward_z)
-                FROM forward_non_normalized
+                SELECT forward_x / forward_length AS forward_x,
+                       forward_y / forward_length AS forward_y,
+                       forward_z / forward_length AS forward_z
+                FROM forward_length_calc
             ),
-            camera_right (right_x, right_y, right_z) AS (
+            camera_right AS (
                 WITH
-                    right_non_normalized (right_x, right_y, right_z) AS (
-                        SELECT forward_z, 0, - forward_x
+                    right_non_normalized AS (
+                        SELECT forward_z   AS right_x,
+                               0           AS right_y,
+                               - forward_x AS right_z
                         FROM camera_forward
+                    ),
+                    right_length_calc AS (
+                        SELECT *,
+                               SQRT(right_x * right_x + right_y * right_y + right_z * right_z) AS right_length
+                        FROM right_non_normalized
                     )
-                SELECT right_x / SQRT(right_x * right_x + right_y * right_y + right_z * right_z),
-                       right_y / SQRT(right_x * right_x + right_y * right_y + right_z * right_z),
-                       right_z / SQRT(right_x * right_x + right_y * right_y + right_z * right_z)
-                FROM right_non_normalized
+                SELECT right_x / right_length AS right_x,
+                       right_y / right_length AS right_y,
+                       right_z / right_length AS right_z
+                FROM right_length_calc
             ),
-            camera_up (up_x, up_y, up_z) AS (
+            camera_up AS (
                 WITH
-                    up_non_normalized (up_x, up_y, up_z) AS (
-                        SELECT (forward_y * right_z) - (forward_z * right_y),
-                               (forward_z * right_x) - (forward_x * right_z),
-                               (forward_x * right_y) - (forward_y * right_x)
+                    up_non_normalized AS (
+                        SELECT (forward_y * right_z) - (forward_z * right_y) AS up_x,
+                               (forward_z * right_x) - (forward_x * right_z) AS up_y,
+                               (forward_x * right_y) - (forward_y * right_x) AS up_z
                         FROM camera_forward,
                              camera_right
+                    ),
+                    up_length_calc AS (
+                        SELECT *,
+                               SQRT(up_x * up_x + up_y * up_y + up_z * up_z) AS up_length
+                        FROM up_non_normalized
                     )
-                SELECT up_x / (up_x * up_x + up_y * up_y + up_z * up_z),
-                       up_y / (up_x * up_x + up_y * up_y + up_z * up_z),
-                       up_z / (up_x * up_x + up_y * up_y + up_z * up_z)
-                FROM up_non_normalized
+                SELECT up_x / up_length AS up_x,
+                       up_y / up_length AS up_y,
+                       up_z / up_length AS up_z
+                FROM up_length_calc
             ),
-            camera_directions (horizontal_direction_x, horizontal_direction_y, horizontal_direction_z,
-                               vertical_direction_x, vertical_direction_y, vertical_direction_z) AS (
-                SELECT right_x * viewport_width,
-                       right_y * viewport_width,
-                       right_z * viewport_width,
-                       up_x * viewport_height,
-                       up_y * viewport_height,
-                       up_z * viewport_height
+            camera_directions AS (
+                SELECT right_x * viewport_width AS horizontal_direction_x,
+                       right_y * viewport_width AS horizontal_direction_y,
+                       right_z * viewport_width AS horizontal_direction_z,
+                       up_x * viewport_height   AS vertical_direction_x,
+                       up_y * viewport_height   AS vertical_direction_y,
+                       up_z * viewport_height   AS vertical_direction_z
                 FROM camera_viewport_width,
                      camera_viewport_height,
                      camera_right,
                      camera_up
             ),
-            camera_upper_left_corner (upper_left_corner_x, upper_left_corner_y, upper_left_corner_z) AS (
-                SELECT camera_look_from_x - horizontal_direction_x / 2.0 + vertical_direction_x / 2.0 + forward_x,
-                       camera_look_from_y - horizontal_direction_y / 2.0 + vertical_direction_y / 2.0 + forward_y,
-                       camera_look_from_z - horizontal_direction_z / 2.0 + vertical_direction_z / 2.0 + forward_z
+            camera_upper_left_corner AS (
+                SELECT camera_look_from_x - horizontal_direction_x / 2.0 + vertical_direction_x / 2.0 +
+                       forward_x AS upper_left_corner_x,
+                       camera_look_from_y - horizontal_direction_y / 2.0 + vertical_direction_y / 2.0 +
+                       forward_y AS upper_left_corner_y,
+                       camera_look_from_z - horizontal_direction_z / 2.0 + vertical_direction_z / 2.0 +
+                       forward_z AS upper_left_corner_z
                 FROM settings,
                      camera_directions,
                      camera_forward
@@ -285,21 +297,21 @@ WITH
         FROM camera_directions,
              camera_upper_left_corner
     ),
-    pixels (pixel_id, sample_id, u, v) AS (
+    pixels AS (
         WITH
             RECURSIVE
-            pixel_ids (pixel_id) AS (
-                SELECT 0
+            pixel_ids AS (
+                SELECT 0 AS pixel_id
                 UNION ALL
-                SELECT pixel_id + 1
+                SELECT pixel_id + 1 AS pixel_id
                 FROM pixel_ids
                 WHERE pixel_id + 1 < (
                     SELECT width * height
                     FROM settings
                 )
             ),
-            pixel_samples (pixel_id, sample_id) AS (
-                SELECT *, 0 AS sample_id
+            pixel_samples AS (
+                SELECT pixel_id, 0 AS sample_id
                 FROM pixel_ids
                 UNION ALL
                 SElECT pixel_id, sample_id + 1 AS sample_id
@@ -326,8 +338,7 @@ WITH
         FROM pixel_uv
     ),
     -- unique identification of rays by (pixel_id, sample_id, ray_depth)
-    rays (pixel_id, sample_id, ray_depth, should_trace, ray_origin_x, ray_origin_y, ray_origin_z, ray_direction_x,
-          ray_direction_y, ray_direction_z, ray_color_r, ray_color_g, ray_color_b) AS (
+    rays AS (
         -- initial rays (origin at the camera):
         (
             WITH
@@ -758,40 +769,44 @@ WITH
             FROM new_rays
         ) AS _
     ),
-    pixel_colors (pixel_id, rgb) AS (
+    pixel_colors AS (
         WITH
-            ray_colors (pixel_id, sample_id, r, g, b) AS (
+            ray_colors AS (
                 -- Postgres only:
-                SELECT DISTINCT ON (pixel_id, sample_id) pixel_id, sample_id, ray_color_r, ray_color_g, ray_color_b
+                SELECT DISTINCT ON (pixel_id, sample_id) pixel_id,
+                                                         sample_id,
+                                                         ray_color_r AS r,
+                                                         ray_color_g AS g,
+                                                         ray_color_b AS b
                 FROM rays
                 ORDER BY pixel_id, sample_id, ray_depth DESC
             ),
-            raw_pixel_colors (pixel_id, r, g, b) AS (
-                SELECT pixel_id, AVG(r), AVG(g), AVG(b)
+            raw_pixel_colors AS (
+                SELECT pixel_id, AVG(r) AS r, AVG(g) AS g, AVG(b) AS b
                 FROM ray_colors
                 GROUP BY pixel_id
             ),
-            processed_pixel_colors (pixel_id, r, g, b) AS (
+            processed_pixel_colors AS (
                 SELECT pixel_id,
-                       FLOOR(SQRT(r) * 255),
-                       FLOOR(SQRT(g) * 255),
-                       FLOOR(SQRT(b) * 255)
+                       FLOOR(SQRT(r) * 255) AS r,
+                       FLOOR(SQRT(g) * 255) AS g,
+                       FLOOR(SQRT(b) * 255) AS b
                 FROM raw_pixel_colors
             )
         SELECT pixel_id, CONCAT(r, ' ', g, ' ', b) AS rgb
         FROM processed_pixel_colors
     ),
-    image (image_in_ppm_format) AS (
+    image AS (
         WITH
             pixels_concatenated AS (
                 SELECT STRING_AGG(rgb, E'\n' ORDER BY pixel_id) AS pixels -- Postgres
---                 SELECT GROUP_CONCAT(rgb SEPARATOR '\n') AS pixels -- MySQL
+                --                 SELECT GROUP_CONCAT(rgb SEPARATOR '\n') AS pixels -- MySQL
                 FROM pixel_colors
             )
-        SELECT CONCAT('P3', E'\n', width, ' ', height, E'\n', '255', E'\n', pixels, E'\n') -- Postgres
---         SELECT CONCAT('P3', '\n', width, ' ', height, '\n', '255', '\n', pixels, '\n') -- MySQL
+        SELECT CONCAT('P3', E'\n', width, ' ', height, E'\n', '255', E'\n', pixels, E'\n') AS image_ppm -- Postgres
+        --         SELECT CONCAT('P3', '\n', width, ' ', height, '\n', '255', '\n', pixels, '\n') AS image_ppm -- MySQL
         FROM pixels_concatenated,
              settings
     )
-SELECT image_in_ppm_format
+SELECT image_ppm
 FROM image
