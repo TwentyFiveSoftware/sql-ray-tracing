@@ -8,6 +8,7 @@ WITH
     settings AS (
         SELECT 300   AS width,
                200   AS height,
+               10    AS samples_per_pixel,
                50    AS max_depth,
                12.0  AS camera_look_from_x,
                2.0   AS camera_look_from_y,
@@ -289,7 +290,7 @@ WITH
         FROM camera_directions,
              camera_upper_left_corner
     ),
-    pixels AS (
+    pixels (pixel_id, sample_id, u, v) AS (
         WITH
             RECURSIVE
             pixel_ids (pixel_id) AS (
@@ -302,20 +303,31 @@ WITH
                     FROM settings
                 )
             ),
+            pixel_samples (pixel_id, sample_id) AS (
+                SELECT *, 0 AS sample_id
+                FROM pixel_ids
+                UNION ALL
+                SElECT pixel_id, sample_id + 1 AS sample_id
+                FROM pixel_samples
+                WHERE sample_id + 1 < (
+                    SELECT samples_per_pixel
+                    FROM settings
+                )
+            ),
             pixel_xy AS (
                 SELECT *,
-                       MOD(pixel_id, width)    AS x,
-                       FLOOR(pixel_id / width) AS y
-                FROM pixel_ids,
+                       MOD(pixel_id, width) + RANDOM()    AS x,
+                       FLOOR(pixel_id / width) + RANDOM() AS y
+                FROM pixel_samples,
                      settings
             ),
             pixel_uv AS (
                 SELECT *,
-                       CAST(x AS FLOAT) / (width - 1)  AS u,
-                       CAST(y AS FLOAT) / (height - 1) AS v
+                       CAST(x AS FLOAT) / width  AS u,
+                       CAST(y AS FLOAT) / height AS v
                 FROM pixel_xy
             )
-        SELECT *
+        SELECT pixel_id, sample_id, u, v
         FROM pixel_uv
     ),
     -- unique identification of rays by (pixel_id, sample_id, ray_depth)
@@ -334,7 +346,8 @@ WITH
                                upper_left_corner_z + horizontal_direction_z * u - vertical_direction_z * v -
                                camera_look_from_z AS direction_z
                         FROM pixels,
-                             camera
+                             camera,
+                             settings
                     ),
                     ray_directions_length AS (
                         SELECT *,
@@ -350,7 +363,7 @@ WITH
                         FROM ray_directions_length
                     )
                 SELECT pixel_id,
-                       0                                 AS sample_id,
+                       sample_id,
                        0                                 AS ray_depth,
                        TRUE                              AS should_trace,
                        CAST(camera_look_from_x AS FLOAT) AS ray_origin_x,
@@ -748,32 +761,41 @@ WITH
             FROM new_rays
         ) AS _
     ),
-    pixel_colors (pixel_id, r, g, b) AS (
-        -- Postgres only:
-        SELECT DISTINCT ON (pixel_id) pixel_id,
-                                      FLOOR(SQRT(ray_color_r) * 0xFF),
-                                      FLOOR(SQRT(ray_color_g) * 0xFF),
-                                      FLOOR(SQRT(ray_color_b) * 0xFF)
-        FROM rays
-        ORDER BY pixel_id, ray_depth DESC
-    ),
-    image_pixel_rgb (rgb) AS (
-        SELECT CONCAT(r, ' ', g, ' ', b)
-        FROM pixel_colors
+    pixel_colors (rgb) AS (
+        WITH
+            ray_colors (pixel_id, sample_id, r, g, b) AS (
+                -- Postgres only:
+                SELECT DISTINCT ON (pixel_id, sample_id) pixel_id, sample_id, ray_color_r, ray_color_g, ray_color_b
+                FROM rays
+                ORDER BY pixel_id, sample_id, ray_depth DESC
+            ),
+            raw_pixel_colors (pixel_id, r, g, b) AS (
+                SELECT pixel_id, AVG(r), AVG(g), AVG(b)
+                FROM ray_colors
+                GROUP BY pixel_id
+            ),
+            processed_pixel_colors (pixel_id, r, g, b) AS (
+                SELECT pixel_id,
+                       FLOOR(SQRT(r) * 0xFF),
+                       FLOOR(SQRT(g) * 0xFF),
+                       FLOOR(SQRT(b) * 0xFF)
+                FROM raw_pixel_colors
+            )
+        SELECT CONCAT(r, ' ', g, ' ', b) AS rgb
+        FROM processed_pixel_colors
         ORDER BY pixel_id
     ),
     image (image_in_ppm_format) AS (
---         SELECT CONCAT('P3', '\n', width, ' ', height, '\n', '255', '\n', pixels, '\n') -- MySQL
+        WITH
+            pixels_concatenated AS (
+                SELECT STRING_AGG(rgb, E'\n') AS pixels -- Postgres
+--                 SELECT GROUP_CONCAT(rgb SEPARATOR '\n') AS pixels -- MySQL
+                FROM pixel_colors
+            )
         SELECT CONCAT('P3', E'\n', width, ' ', height, E'\n', '255', E'\n', pixels, E'\n') -- Postgres
-        FROM (
---                  SELECT GROUP_CONCAT(rgb SEPARATOR '\n') AS pixels -- MySQL
-                 SELECT STRING_AGG(rgb, E'\n') AS pixels -- Postgres
-                 FROM image_pixel_rgb
-             ) AS p,
-             (
-                 SELECT width, height
-                 FROM settings
-             ) AS dimensions
+--         SELECT CONCAT('P3', '\n', width, ' ', height, '\n', '255', '\n', pixels, '\n') -- MySQL
+        FROM pixels_concatenated,
+             settings
     )
 SELECT image_in_ppm_format
 FROM image
