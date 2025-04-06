@@ -3,15 +3,34 @@ services:
     image: postgres
     restart: always
     command: >
-      -c jit_above_cost=1
-      -c jit_inline_above_cost=1
-      -c jit_optimize_above_cost=1
-      -c max_parallel_workers_per_gather=8
-      -c max_worker_processes=8
-      -c max_parallel_workers=8
-      -c work_mem=256MB
+      -c jit_above_cost=0
+      -c jit_inline_above_cost=0
+      -c jit_optimize_above_cost=0
       -c geqo_effort=10
     environment:
       POSTGRES_PASSWORD: super-secret-password
     ports:
       - '5432:5432'
+    volumes:
+      - './ray-tracing.sql:/opt/ray-tracing.sql:ro'
+
+  clickhouse:
+    image: clickhouse
+    restart: always
+    environment:
+      CLICKHOUSE_PASSWORD: super-secret-password
+    ports:
+      - '8123:8123'
+    volumes:
+      - './ray-tracing.sql:/opt/ray-tracing.sql:ro'
+    ulimits:
+      stack: 8277716992
+
+#  mysql:
+#    image: mysql
+#    restart: always
+#    environment:
+#      MYSQL_ROOT_PASSWORD: super-secret-password
+#      MYSQL_DATABASE: ray-tracing
+#    ports:
+#      - '3306:3306'

@@ -800,11 +800,12 @@ WITH
         WITH
             pixels_concatenated AS (
                 SELECT STRING_AGG(rgb, E'\n' ORDER BY pixel_id) AS pixels -- Postgres
-                --                 SELECT GROUP_CONCAT(rgb SEPARATOR '\n') AS pixels -- MySQL
+                --  SELECT arrayStringConcat(groupArray(rgb), ',') AS pixels -- ClickHouse
+                --  SELECT GROUP_CONCAT(rgb SEPARATOR '\n') AS pixels -- MySQL
                 FROM pixel_colors
             )
         SELECT CONCAT('P3', E'\n', width, ' ', height, E'\n', '255', E'\n', pixels, E'\n') AS image_ppm -- Postgres
-        --         SELECT CONCAT('P3', '\n', width, ' ', height, '\n', '255', '\n', pixels, '\n') AS image_ppm -- MySQL
+        -- SELECT CONCAT('P3', '\n', width, ' ', height, '\n', '255', '\n', pixels, '\n') AS image_ppm -- ClickHouse, MySQL
         FROM pixels_concatenated,
              settings
     )
