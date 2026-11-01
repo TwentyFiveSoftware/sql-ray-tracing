@@ -546,47 +546,17 @@ WITH
                                    normal_z                      AS hit_normal_z
                             FROM scatter_rays_with_color
                         ),
-                        random_unit_vectors AS (
-                            (
-                                SELECT *,
-                                       RANDOM() * 2.0 - 1.0 AS x,
-                                       RANDOM() * 2.0 - 1.0 AS y,
-                                       RANDOM() * 2.0 - 1.0 AS z
-                                FROM incomplete_scattered_rays
-                            )
-                            UNION ALL
-                            (
-                                SELECT pixel_id,
-                                       sample_id,
-                                       ray_depth,
-                                       ray_origin_x,
-                                       ray_origin_y,
-                                       ray_origin_z,
-                                       ray_color_r,
-                                       ray_color_g,
-                                       ray_color_b,
-                                       hit_normal_x,
-                                       hit_normal_y,
-                                       hit_normal_z,
-                                       RANDOM() * 2.0 - 1.0 AS x,
-                                       RANDOM() * 2.0 - 1.0 AS y,
-                                       RANDOM() * 2.0 - 1.0 AS z
-                                FROM random_unit_vectors
-                                WHERE x * x + y * y + z * z > 1
-                                   OR x + y + z = 0
-                                   OR (ABS(x) < 1e-8 AND ABS(y) < 1e-8 AND ABS(z) < 1e-8)
-                            )
-                        ),
                         normalized_random_unit_vectors AS (
-                            -- Postgres only:
-                            SELECT DISTINCT ON (pixel_id, sample_id) *, -- identifies a single ray
-                                                                     x / SQRT(x * x + y * y + z * z) AS random_unit_vector_x,
-                                                                     y / SQRT(x * x + y * y + z * z) AS random_unit_vector_y,
-                                                                     z / SQRT(x * x + y * y + z * z) AS random_unit_vector_z
-                            FROM random_unit_vectors
-                            WHERE x * x + y * y + z * z <= 1
-                              AND x + y + z <> 0
-                              AND NOT (ABS(x) < 1e-8 AND ABS(z) < 1e-8 AND ABS(z) < 1e-8)
+                            SELECT *,
+                                   SQRT(1.0 - z * z) * COS(phi) AS random_unit_vector_x,
+                                   SQRT(1.0 - z * z) * SIN(phi) AS random_unit_vector_y,
+                                   z                            AS random_unit_vector_z
+                            FROM (
+                                 SELECT *,
+                                        2.0 * PI() * RANDOM() AS phi,
+                                        2.0 * RANDOM() - 1.0  AS z
+                                 FROM incomplete_scattered_rays
+                             ) AS _
                         ),
                         scatter_records_with_non_normalized_scatter_ray_direction AS (
                             SELECT *,
