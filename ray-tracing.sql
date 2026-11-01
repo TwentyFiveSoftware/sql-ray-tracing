@@ -84,7 +84,7 @@ WITH
             ),
             random_spheres AS (
                 -- dummy sphere, so that there is an initial sphere_id for the recursion
-                SELECT 0                AS sphere_id,
+                SELECT CAST(0 AS INT)   AS sphere_id,
                        CAST(0 AS FLOAT) AS sphere_center_x,
                        CAST(0 AS FLOAT) AS sphere_center_y,
                        CAST(0 AS FLOAT) AS sphere_center_z,
@@ -293,7 +293,7 @@ WITH
                      camera_directions,
                      camera_forward
             )
-        SELECT camera_directions.*, camera_upper_left_corner.*
+        SELECT *
         FROM camera_directions,
              camera_upper_left_corner
     ),
@@ -301,7 +301,7 @@ WITH
         WITH
             RECURSIVE
             pixel_ids AS (
-                SELECT 0 AS pixel_id
+                SELECT CAST(0 AS INT) AS pixel_id
                 UNION ALL
                 SELECT pixel_id + 1 AS pixel_id
                 FROM pixel_ids
@@ -311,7 +311,7 @@ WITH
                 )
             ),
             pixel_samples AS (
-                SELECT pixel_id, 0 AS sample_id
+                SELECT pixel_id, CAST(0 AS INT) AS sample_id
                 FROM pixel_ids
                 UNION ALL
                 SElECT pixel_id, sample_id + 1 AS sample_id
@@ -371,7 +371,7 @@ WITH
                         )
                     SELECT pixel_id,
                            sample_id,
-                           0                                 AS ray_depth,
+                           CAST(0 AS INT)                    AS ray_depth,
                            TRUE                              AS should_trace,
                            CAST(camera_look_from_x AS FLOAT) AS ray_origin_x,
                            CAST(camera_look_from_y AS FLOAT) AS ray_origin_y,
@@ -394,41 +394,27 @@ WITH
         -- recursive ray intersection and color calculation:
         SELECT *
         FROM (
-            WITH
+             WITH
+                -- assumes that `rays` only contains the rows emitted by the preceding recursion
                 last_ray_per_pixel AS (
-                    WITH
-                        all_rays AS (
-                            SELECT *
-                            FROM rays
-                        )
-                    SELECT all_rays.*
-                    FROM (
-                        SELECT pixel_id, MAX(ray_depth) AS depth
-                        FROM all_rays
-                        GROUP BY pixel_id
-                    ) AS last_ray_per_pixel
-                    JOIN all_rays
-                         ON last_ray_per_pixel.pixel_id = all_rays.pixel_id AND
-                            last_ray_per_pixel.depth = all_rays.ray_depth
+                    SELECT *
+                    FROM rays
                     WHERE should_trace = TRUE
                 ),
                 rays_to_trace AS (
-                    SELECT last_ray_per_pixel.*
-                    FROM last_ray_per_pixel,
-                         settings
-                    WHERE ray_depth < max_depth
+                    SELECT *
+                    FROM last_ray_per_pixel
+                    WHERE ray_depth < (SELECT max_depth FROM settings)
                 ),
                 rays_exceeding_depth_limit AS (
                     SELECT pixel_id, sample_id, ray_depth
-                    FROM last_ray_per_pixel,
-                         settings
-                    WHERE ray_depth >= max_depth
+                    FROM last_ray_per_pixel
+                    WHERE ray_depth >= (SELECT max_depth FROM settings)
                 ),
                 closest_ray_intersections AS (
                     WITH
                         sphere_intersection_calc AS (
-                            SELECT rays_to_trace.*,
-                                   spheres.*,
+                            SELECT *,
                                    ray_direction_x * ray_direction_x + ray_direction_y * ray_direction_y +
                                    ray_direction_z * ray_direction_z                  AS a,
                                    (ray_origin_x - sphere_center_x) * ray_direction_x +
@@ -464,7 +450,6 @@ WITH
                                  settings
                         ),
                         closest_sphere_intersection AS (
-                            -- Postgres only:
                             SELECT DISTINCT ON (pixel_id, sample_id, ray_depth) * -- identifies a single ray
                             FROM sphere_intersection_t
                             WHERE t >= 0.0
@@ -483,7 +468,7 @@ WITH
                             FROM closest_ray_intersections
                         ),
                         intersection_outward_normal AS (
-                            SELECT intersection_point.*,
+                            SELECT *,
                                    (point_x - sphere_center_x) / sphere_radius AS outward_normal_x,
                                    (point_y - sphere_center_y) / sphere_radius AS outward_normal_y,
                                    (point_z - sphere_center_z) / sphere_radius AS outward_normal_z
@@ -742,7 +727,6 @@ WITH
     pixel_colors AS (
         WITH
             ray_colors AS (
-                -- Postgres only:
                 SELECT DISTINCT ON (pixel_id, sample_id) pixel_id,
                                                          sample_id,
                                                          ray_color_r AS r,
