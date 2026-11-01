@@ -25,7 +25,7 @@ They can be found in the first CTE in the `ray-tracing.sql` file.
 
 ```shell
 docker compose up -d
-docker compose exec psql-client psql -h postgres -c '\timing' -f /opt/ray-tracing.sql
+docker compose exec -T psql-client psql -h postgres -t -A -o /dev/stderr -c '\timing on' -c '\i /opt/ray-tracing.sql' 2> render-postgres.ppm
 ```
 
 ### UmbraDB (very fast)
@@ -34,7 +34,7 @@ Using the Postgres-compatible server:
 
 ```shell
 docker compose up -d
-docker compose exec psql-client psql -h umbra -c '\timing' -f /opt/ray-tracing.sql
+docker compose exec -T psql-client psql -h umbra -t -A -o /dev/stderr -c '\timing on' -c '\i /opt/ray-tracing.sql' 2> render-umbra.ppm
 ```
 
 Alternatively, run as a one-off command:
