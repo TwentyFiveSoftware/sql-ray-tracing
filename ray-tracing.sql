@@ -448,8 +448,8 @@ WITH
                         ),
                         sphere_intersection_roots AS (
                             SELECT *,
-                                   (-half_b - SQRT(discriminant)) / a AS root_1,
-                                   (-half_b + SQRT(discriminant)) / a AS root_2
+                                   (-half_b - SQRT(GREATEST(discriminant, 0.0))) / a AS root_1,
+                                   (-half_b + SQRT(GREATEST(discriminant, 0.0))) / a AS root_2
                             FROM sphere_intersection_discriminants
                             WHERE discriminant >= 0
                         ),
@@ -574,7 +574,7 @@ WITH
                                 FROM random_unit_vectors
                                 WHERE x * x + y * y + z * z > 1
                                    OR x + y + z = 0
-                                   OR (ABS(x) < 1e-8 AND ABS(z) < 1e-8 AND ABS(z) < 1e-8)
+                                   OR (ABS(x) < 1e-8 AND ABS(y) < 1e-8 AND ABS(z) < 1e-8)
                             )
                         ),
                         normalized_random_unit_vectors AS (
@@ -698,13 +698,13 @@ WITH
                                 refraction_calc_refraction_vector AS (
                                     SELECT *,
                                            refraction_ratio * ray_direction_x -
-                                           (refraction_ratio * dot_n_i + SQRT(refraction_k)) *
+                                           (refraction_ratio * dot_n_i + SQRT(GREATEST(refraction_k, 0.0))) *
                                            normal_x AS refraction_vector_x,
                                            refraction_ratio * ray_direction_y -
-                                           (refraction_ratio * dot_n_i + SQRT(refraction_k)) *
+                                           (refraction_ratio * dot_n_i + SQRT(GREATEST(refraction_k, 0.0))) *
                                            normal_y AS refraction_vector_y,
                                            refraction_ratio * ray_direction_z -
-                                           (refraction_ratio * dot_n_i + SQRT(refraction_k)) *
+                                           (refraction_ratio * dot_n_i + SQRT(GREATEST(refraction_k, 0.0))) *
                                            normal_z AS refraction_vector_z
                                     FROM refraction_calc_k
                                 )
