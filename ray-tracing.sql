@@ -300,15 +300,25 @@ WITH
     pixels AS (
         WITH
             RECURSIVE
-            pixel_ids AS (
-                SELECT CAST(0 AS INT) AS pixel_id
+            x_coordinates AS (
+                SELECT CAST(0 AS INT) AS x
                 UNION ALL
-                SELECT pixel_id + 1
-                FROM pixel_ids
-                WHERE pixel_ids.pixel_id < (
-                    SELECT width * height - 1
-                    FROM settings
-                )
+                SELECT x + 1
+                FROM x_coordinates
+                WHERE x_coordinates.x < (SELECT width - 1 FROM settings)
+            ),
+            y_coordinates AS (
+                SELECT CAST(0 AS INT) AS y
+                UNION ALL
+                SELECT y + 1
+                FROM y_coordinates
+                WHERE y_coordinates.y < (SELECT height - 1 FROM settings)
+            ),
+            pixel_ids AS (
+                SELECT y * width + x AS pixel_id
+                FROM x_coordinates,
+                     y_coordinates,
+                     settings
             ),
             pixel_samples AS (
                 SELECT pixel_id, CAST(0 AS INT) AS sample_id
@@ -316,7 +326,7 @@ WITH
                 UNION ALL
                 SELECT pixel_id, sample_id + 1
                 FROM pixel_samples
-                WHERE sample_id < (
+                WHERE pixel_samples.sample_id < (
                     SELECT samples_per_pixel - 1
                     FROM settings
                 )
