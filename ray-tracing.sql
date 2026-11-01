@@ -767,17 +767,17 @@ WITH
         FROM processed_pixel_colors
     ),
     image AS (
-        WITH
-            pixels_concatenated AS (
-                SELECT STRING_AGG(rgb, E'\n' ORDER BY pixel_id) AS pixels -- Postgres
-                --  SELECT arrayStringConcat(groupArray(rgb), ',') AS pixels -- ClickHouse
-                --  SELECT GROUP_CONCAT(rgb SEPARATOR '\n') AS pixels -- MySQL
-                FROM pixel_colors
-            )
-        SELECT CONCAT('P3', E'\n', width, ' ', height, E'\n', '255', E'\n', pixels, E'\n') AS image_ppm -- Postgres
-        -- SELECT CONCAT('P3', '\n', width, ' ', height, '\n', '255', '\n', pixels, '\n') AS image_ppm -- ClickHouse, MySQL
-        FROM pixels_concatenated,
-             settings
+        SELECT -3 AS line_number, 'P3' AS line
+        UNION ALL
+        SELECT -2 AS line_number, CONCAT(width, ' ', height) AS line
+        FROM settings
+        UNION ALL
+        SELECT -1 AS line_number, '255' AS line
+        FROM settings
+        UNION ALL
+        SELECT pixel_id AS line_number, rgb AS line
+        FROM pixel_colors
     )
-SELECT image_ppm
+SELECT line
 FROM image
+ORDER BY line_number;
