@@ -9,18 +9,12 @@ services:
       -c geqo_effort=10
     environment:
       POSTGRES_PASSWORD: postgres
-    ports:
-      - '5432:5432'
     volumes:
       - './ray-tracing.sql:/opt/ray-tracing.sql:ro'
 
   clickhouse:
     image: clickhouse
     restart: always
-    environment:
-      CLICKHOUSE_PASSWORD: super-secret-password
-    ports:
-      - '8123:8123'
     volumes:
       - './ray-tracing.sql:/opt/ray-tracing.sql:ro'
     ulimits:

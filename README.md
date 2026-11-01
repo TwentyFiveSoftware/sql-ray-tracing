@@ -21,14 +21,14 @@ query execution capabilities.
 Settings like width, height, and sample count can be modified in the settings.
 They can be found in the first CTE in the `ray-tracing.sql` file.
 
-### PostgreSQL
+### Postgres
 
 ```shell
 docker compose up -d
 docker compose exec -T psql-client psql -h postgres -t -A -o /dev/stderr -c '\timing on' -c '\i /opt/ray-tracing.sql' 2> render-postgres.ppm
 ```
 
-### UmbraDB (very fast)
+### UmbraDB
 
 Using the Postgres-compatible server:
 
@@ -43,17 +43,21 @@ Alternatively, run as a one-off command:
 docker run -it -v ./ray-tracing.sql:/var/db/ray-tracing.sql umbradb/umbra:latest umbra-sql -createdb /var/db/umbra.db /var/db/ray-tracing.sql
 ```
 
-### ClickHouse (very slow)
+### ClickHouse
 
 ```shell
 docker compose up -d
 docker compose exec -T clickhouse clickhouse-client --query "CREATE FUNCTION IF NOT EXISTS RANDOM AS () -> randCanonical()"
-docker compose exec -T clickhouse clickhouse-client --max_subquery_depth=100000000 --max_recursive_cte_evaluation_depth=1000000 --queries-file /opt/ray-tracing.sql > render-clickhouse.ppm
+docker compose exec -T clickhouse clickhouse-client --time --queries-file /opt/ray-tracing.sql > render-clickhouse.ppm
 ```
 
 ## Performance
 
-|          | 1 sample / pixel | 100 samples / pixel | 
-|----------|-----------------:|--------------------:|
-| Postgres |        64,000 ms |                 N/A |
-| Umbra    |         1,500 ms |                 N/A |
+The performance was measured on the same scene (see image above) with the same number of objects, the same recursive
+depth, the same resolution (800 x 450). The measured times are averaged over multiple runs.
+
+|            | 1 sample / pixel | 100 samples / pixel | 
+|------------|-----------------:|--------------------:|
+| ClickHouse |          199.1 s |                 N/A |
+| Postgres   |           53.7 s |                 N/A |
+| Umbra      |            1.2 s |                 N/A |
