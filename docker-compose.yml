@@ -27,6 +27,13 @@ services:
       nofile: 1048576
       memlock: 8388608
 
+  cedardb:
+    image: cedardb/cedardb
+    restart: always
+    environment:
+      CEDAR_PASSWORD: super-secret-password
+      COMPILATIONMODE: o
+
   psql-client:
     image: postgres
     entrypoint: ["sleep", "infinity"]
