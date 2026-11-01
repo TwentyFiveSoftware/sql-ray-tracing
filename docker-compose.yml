@@ -8,7 +8,7 @@ services:
       -c jit_optimize_above_cost=0
       -c geqo_effort=10
     environment:
-      POSTGRES_PASSWORD: super-secret-password
+      POSTGRES_PASSWORD: postgres
     ports:
       - '5432:5432'
     volumes:
@@ -25,6 +25,22 @@ services:
       - './ray-tracing.sql:/opt/ray-tracing.sql:ro'
     ulimits:
       stack: 8277716992
+
+  umbra:
+    image: umbradb/umbra
+    restart: always
+    ulimits:
+      nofile: 1048576
+      memlock: 8388608
+
+  psql-client:
+    image: postgres
+    entrypoint: ["sleep", "infinity"]
+    environment:
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    volumes:
+      - './ray-tracing.sql:/opt/ray-tracing.sql:ro'
 
 #  mysql:
 #    image: mysql

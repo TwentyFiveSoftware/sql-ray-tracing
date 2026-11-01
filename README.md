@@ -25,10 +25,19 @@ They can be found in the first CTE in the `ray-tracing.sql` file.
 
 ```shell
 docker compose up -d
-docker compose exec -it postgres psql -U postgres -c '\timing' -f /opt/ray-tracing.sql
+docker compose exec psql-client psql -h postgres -c '\timing' -f /opt/ray-tracing.sql
 ```
 
 ### UmbraDB (very fast)
+
+Using the Postgres-compatible server:
+
+```shell
+docker compose up -d
+docker compose exec psql-client psql -h umbra -c '\timing' -f /opt/ray-tracing.sql
+```
+
+Alternatively, run as a one-off command:
 
 ```shell
 docker run -it -v ./ray-tracing.sql:/var/db/ray-tracing.sql umbradb/umbra:latest umbra-sql -createdb /var/db/umbra.db /var/db/ray-tracing.sql
@@ -50,5 +59,7 @@ Required modifications to `ray-tracing.sql`:
 
 ## Performance
 
-Not benchmarked yet.
-
+|          | 1 sample / pixel | 100 samples / pixel | 
+|----------|-----------------:|--------------------:|
+| Postgres |        64,000 ms |                 N/A |
+| Umbra    |         1,500 ms |                 N/A |
