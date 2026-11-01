@@ -47,16 +47,9 @@ docker run -it -v ./ray-tracing.sql:/var/db/ray-tracing.sql umbradb/umbra:latest
 
 ```shell
 docker compose up -d
-docker compose exec -it clickhouse clickhouse-client --query "SET max_subquery_depth = 100000000"
-docker compose exec -it clickhouse clickhouse-client --query "CREATE FUNCTION IF NOT EXISTS RANDOM AS () -> randCanonical()"
-docker compose exec -it clickhouse clickhouse-client --queries-file /opt/ray-tracing.sql
+docker compose exec -T clickhouse clickhouse-client --query "CREATE FUNCTION IF NOT EXISTS RANDOM AS () -> randCanonical()"
+docker compose exec -T clickhouse clickhouse-client --max_subquery_depth=100000000 --max_recursive_cte_evaluation_depth=1000000 --queries-file /opt/ray-tracing.sql > render-clickhouse.ppm
 ```
-
-Required modifications to `ray-tracing.sql`:
-
-- Put `SET max_subquery_depth = 100000;` before SELECT the query
-- Uncomment lines annotated with `-- ClickHouse`
-- Replace all `RANDOM()` with `RAND()`
 
 ## Performance
 

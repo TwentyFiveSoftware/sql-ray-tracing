@@ -102,7 +102,7 @@ WITH
                         new_sphere AS (
                             SELECT sphere_id + 1 AS sphere_id
                             FROM random_spheres
-                            WHERE sphere_id < 22 * 22
+                            WHERE random_spheres.sphere_id < 22 * 22
                         ),
                         sphere_location AS (
                             SELECT *,
@@ -303,10 +303,10 @@ WITH
             pixel_ids AS (
                 SELECT CAST(0 AS INT) AS pixel_id
                 UNION ALL
-                SELECT pixel_id + 1 AS pixel_id
+                SELECT pixel_id + 1
                 FROM pixel_ids
-                WHERE pixel_id + 1 < (
-                    SELECT width * height
+                WHERE pixel_ids.pixel_id < (
+                    SELECT width * height - 1
                     FROM settings
                 )
             ),
@@ -314,10 +314,10 @@ WITH
                 SELECT pixel_id, CAST(0 AS INT) AS sample_id
                 FROM pixel_ids
                 UNION ALL
-                SElECT pixel_id, sample_id + 1 AS sample_id
+                SELECT pixel_id, sample_id + 1
                 FROM pixel_samples
-                WHERE sample_id + 1 < (
-                    SELECT samples_per_pixel
+                WHERE sample_id < (
+                    SELECT samples_per_pixel - 1
                     FROM settings
                 )
             ),
